@@ -3,6 +3,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        APK_MIRROR: ${APK_MIRROR-https://mirrors.aliyun.com/alpine}
+        GOPROXY: ${GOPROXY-https://goproxy.cn,direct}
+        GOSUMDB: ${GOSUMDB-sum.golang.google.cn}
     image: newapi-usage:local
     container_name: newapi-usage
     restart: unless-stopped

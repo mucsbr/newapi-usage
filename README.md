@@ -26,6 +26,31 @@ Open:
 http://your-server-ip:8080
 ```
 
+## Mainland China Build
+
+The Docker build uses China-mainland friendly defaults:
+
+- `APK_MIRROR=https://mirrors.aliyun.com/alpine`
+- `GOPROXY=https://goproxy.cn,direct`
+- `GOSUMDB=sum.golang.google.cn`
+
+They can be changed in `.env`, or passed directly:
+
+```bash
+docker compose build \
+  --build-arg APK_MIRROR=https://mirrors.aliyun.com/alpine \
+  --build-arg GOPROXY=https://goproxy.cn,direct \
+  --build-arg GOSUMDB=sum.golang.google.cn
+```
+
+To use official upstream sources instead:
+
+```env
+APK_MIRROR=
+GOPROXY=https://proxy.golang.org,direct
+GOSUMDB=sum.golang.org
+```
+
 ## Configuration
 
 Use `SQL_DSN` to point at the same database used by NewAPI.
