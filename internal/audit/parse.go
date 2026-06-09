@@ -3,9 +3,11 @@ package audit
 import (
 	"encoding/json"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
+	_ "time/tzdata"
 )
 
 func parseLine(line string) (parsedRecord, error) {
@@ -168,15 +170,32 @@ func parseTimestamp(raw json.RawMessage) int64 {
 	for _, layout := range []string{
 		time.RFC3339Nano,
 		time.RFC3339,
-		"2006-01-02T15:04:05",
-		"2006-01-02 15:04:05",
-		"2006/01/02 15:04:05",
 	} {
 		if parsed, err := time.Parse(layout, text); err == nil {
 			return parsed.Unix()
 		}
 	}
+	location := timestampLocation()
+	for _, layout := range []string{
+		"2006-01-02T15:04:05",
+		"2006-01-02 15:04:05",
+		"2006/01/02 15:04:05",
+	} {
+		if parsed, err := time.ParseInLocation(layout, text, location); err == nil {
+			return parsed.Unix()
+		}
+	}
 	return 0
+}
+
+func timestampLocation() *time.Location {
+	tz := strings.TrimSpace(os.Getenv("TZ"))
+	if tz != "" {
+		if location, err := time.LoadLocation(tz); err == nil {
+			return location
+		}
+	}
+	return time.Local
 }
 
 func firstString(obj map[string]json.RawMessage, keys ...string) string {
