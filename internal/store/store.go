@@ -430,9 +430,22 @@ func (s *Store) ResolveTokenByKey(key string) (TokenIdentity, error) {
 	defer cancel()
 
 	query := fmt.Sprintf(`SELECT id, COALESCE(name, ''), COALESCE(%s, '') FROM tokens WHERE %s = %s LIMIT 1`, s.keyTailExpr("tokens"), s.tokenKeyColumn("tokens"), s.placeholder(1))
-	var out TokenIdentity
-	err := s.db.QueryRowContext(ctx, query, key).Scan(&out.TokenID, &out.Name, &out.KeyTail)
-	return out, err
+	var lastErr error
+	for _, candidate := range tokenKeyCandidates(key) {
+		var out TokenIdentity
+		err := s.db.QueryRowContext(ctx, query, candidate).Scan(&out.TokenID, &out.Name, &out.KeyTail)
+		if err == nil {
+			return out, nil
+		}
+		lastErr = err
+		if err != sql.ErrNoRows {
+			return TokenIdentity{}, err
+		}
+	}
+	if lastErr != nil {
+		return TokenIdentity{}, lastErr
+	}
+	return TokenIdentity{}, sql.ErrNoRows
 }
 
 func (s *Store) context(ctx context.Context) (context.Context, context.CancelFunc) {
@@ -492,4 +505,29 @@ func (s *Store) keyTailExpr(alias string) string {
 	default:
 		return "RIGHT(" + keyCol + ", 8)"
 	}
+}
+
+func tokenKeyCandidates(key string) []string {
+	key = strings.TrimSpace(key)
+	if strings.HasPrefix(strings.ToLower(key), "bearer ") {
+		key = strings.TrimSpace(key[7:])
+	}
+	candidates := make([]string, 0, 2)
+	add := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		for _, existing := range candidates {
+			if existing == value {
+				return
+			}
+		}
+		candidates = append(candidates, value)
+	}
+	add(key)
+	if strings.HasPrefix(strings.ToLower(key), "sk-") {
+		add(key[3:])
+	}
+	return candidates
 }

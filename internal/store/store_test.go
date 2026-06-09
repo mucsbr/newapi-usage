@@ -101,6 +101,14 @@ func TestStoreQueries(t *testing.T) {
 	if logs.Items[0].RequestID != "req-2" || logs.Items[0].TotalTokens != 40 {
 		t.Fatalf("unexpected first log: %+v", logs.Items[0])
 	}
+
+	token, err := s.ResolveTokenByKey("sk-abcdef1234567890")
+	if err != nil {
+		t.Fatalf("resolve prefixed token key: %v", err)
+	}
+	if token.TokenID != 1 || token.KeyTail != "34567890" {
+		t.Fatalf("unexpected resolved token: %+v", token)
+	}
 }
 
 func execMany(t *testing.T, db *sql.DB, statements []string) {
