@@ -613,6 +613,19 @@
         return Number.isFinite(ms) ? Math.floor(ms / 1000) : "";
       }
 
+      function unixToDateValue(ts) {
+        const date = new Date(ts * 1000);
+        const offsetMs = date.getTimezoneOffset() * 60 * 1000;
+        return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
+      }
+
+      function setDefaultTimeRange() {
+        const end = Math.floor(Date.now() / 1000);
+        const start = end - 24 * 60 * 60;
+        el("start").value = unixToDateValue(start);
+        el("end").value = unixToDateValue(end);
+      }
+
       function baseParams() {
         const params = new URLSearchParams();
         const start = dateValueToUnix(el("start").value);
@@ -885,8 +898,7 @@
         loadAll().catch(notifyError);
       });
       el("clear").addEventListener("click", () => {
-        el("start").value = "";
-        el("end").value = "";
+        setDefaultTimeRange();
         el("search").value = "";
         el("logModel").value = "";
         el("logType").value = "all";
@@ -932,6 +944,7 @@
         }
       });
 
+      setDefaultTimeRange();
       loadAll().catch(notifyError);
     </script>
   </body>
