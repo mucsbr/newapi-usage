@@ -19,14 +19,16 @@ func parseLine(line string) (parsedRecord, error) {
 	body := extractBody(obj)
 	bodyObj := parseJSONObject(body)
 
+	createdAt, hasTimestamp := extractTimestamp(obj)
 	record := parsedRecord{
-		CreatedAt: extractTimestamp(obj),
-		Method:    strings.ToUpper(firstString(obj, "method", "request_method", "requestMethod")),
-		Path:      path,
-		Model:     firstBodyString(bodyObj, "model"),
-		RequestID: firstString(obj, "request_id", "requestId", "trace_id", "traceId"),
-		APIKey:    extractAPIKey(headers, path),
-		Body:      body,
+		CreatedAt:    createdAt,
+		HasTimestamp: hasTimestamp,
+		Method:       strings.ToUpper(firstString(obj, "method", "request_method", "requestMethod")),
+		Path:         path,
+		Model:        firstBodyString(bodyObj, "model"),
+		RequestID:    firstString(obj, "request_id", "requestId", "trace_id", "traceId"),
+		APIKey:       extractAPIKey(headers, path),
+		Body:         body,
 	}
 	if record.RequestID == "" {
 		record.RequestID = firstHeader(headers, "x-oneapi-request-id", "x-request-id", "request-id")
@@ -120,17 +122,17 @@ func usableKey(value string) bool {
 	return lower != "[redacted]" && lower != "redacted" && lower != "***" && lower != "-"
 }
 
-func extractTimestamp(obj map[string]json.RawMessage) int64 {
+func extractTimestamp(obj map[string]json.RawMessage) (int64, bool) {
 	for _, key := range []string{"created_at", "createdAt", "timestamp", "time", "ts", "@timestamp"} {
 		raw, ok := getRaw(obj, key)
 		if !ok || len(raw) == 0 || string(raw) == "null" {
 			continue
 		}
 		if ts := parseTimestamp(raw); ts > 0 {
-			return ts
+			return ts, true
 		}
 	}
-	return time.Now().Unix()
+	return 0, false
 }
 
 func parseTimestamp(raw json.RawMessage) int64 {

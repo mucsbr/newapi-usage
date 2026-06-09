@@ -19,23 +19,24 @@ type ResolvedToken struct {
 type TokenResolver func(key string) (ResolvedToken, error)
 
 type Entry struct {
-	ID          int64     `json:"id"`
-	CreatedAt   int64     `json:"created_at"`
-	IngestedAt  int64     `json:"ingested_at"`
-	SourcePath  string    `json:"source_path"`
-	SourceLine  int64     `json:"source_line"`
-	ByteOffset  int64     `json:"byte_offset"`
-	Method      string    `json:"method"`
-	Path        string    `json:"path"`
-	Model       string    `json:"model"`
-	TokenID     int64     `json:"token_id"`
-	KeyTail     string    `json:"key_tail"`
-	KeyHash     string    `json:"key_hash"`
-	RequestID   string    `json:"request_id"`
-	Body        string    `json:"body"`
-	Messages    []Message `json:"messages"`
-	MatchedBy   string    `json:"matched_by"`
-	MatchedNote string    `json:"matched_note"`
+	ID           int64     `json:"id"`
+	CreatedAt    int64     `json:"created_at"`
+	IngestedAt   int64     `json:"ingested_at"`
+	SourcePath   string    `json:"source_path"`
+	SourceLine   int64     `json:"source_line"`
+	ByteOffset   int64     `json:"byte_offset"`
+	Method       string    `json:"method"`
+	Path         string    `json:"path"`
+	Model        string    `json:"model"`
+	TokenID      int64     `json:"token_id"`
+	KeyTail      string    `json:"key_tail"`
+	KeyHash      string    `json:"key_hash"`
+	RequestID    string    `json:"request_id"`
+	HasTimestamp bool      `json:"has_timestamp"`
+	Body         string    `json:"body"`
+	Messages     []Message `json:"messages"`
+	MatchedBy    string    `json:"matched_by"`
+	MatchedNote  string    `json:"matched_note"`
 }
 
 type Message struct {
@@ -66,11 +67,12 @@ type Status struct {
 }
 
 type parsedRecord struct {
-	CreatedAt int64
-	Method    string
-	Path      string
-	Model     string
-	RequestID string
-	APIKey    string
-	Body      string
+	CreatedAt    int64
+	Method       string
+	Path         string
+	Model        string
+	RequestID    string
+	HasTimestamp bool
+	APIKey       string
+	Body         string
 }

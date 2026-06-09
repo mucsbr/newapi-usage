@@ -105,8 +105,11 @@ The SQLite index stores request bodies plus token ID, key tail, key hash, model,
 
 Matching order in the UI:
 
-1. `logs.request_id` to audit `request_id`, if the JSONL contains it.
-2. Fallback to `token_id + model + created_at` within `AUDIT_LOOKUP_WINDOW_SECONDS`.
+1. `logs.token_id + logs.created_at` against timestamped audit rows, with the same model ranked first.
+2. `logs.request_id` to audit `request_id`, only if the audit JSONL explicitly contains a compatible request ID.
+3. Latest rows with the same `token_id`, with the same model ranked first.
+
+If the JSONL has no timestamp field, the service can still show same-token candidates, but it cannot uniquely identify the exact request when the same key has concurrent or high-frequency traffic. Add a timestamp such as `time`, `timestamp`, or `created_at` to the OpenResty JSONL for better matching.
 
 Only request bodies are shown. Model response text is not available unless the OpenResty audit layer also records response bodies.
 

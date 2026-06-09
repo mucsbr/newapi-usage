@@ -779,7 +779,8 @@
           el("auditMessages").innerHTML = `<div class="empty">没有匹配到请求体</div>`;
           return;
         }
-        el("auditNotice").textContent = `${item.matched_by || "matched"} · ${item.source_path}:${item.source_line}`;
+        const timestampNote = item.has_timestamp ? "" : " · no timestamp";
+        el("auditNotice").textContent = `${item.matched_by || "matched"}${timestampNote} · ${item.matched_note || ""} · ${item.source_path}:${item.source_line}`;
         el("auditNotice").className = "pill success";
         const messages = item.messages || [];
         if (messages.length) {

@@ -44,6 +44,41 @@ type fileState struct {
 	LineNo     int64
 }
 
+type scanStats struct {
+	MatchedFiles    int
+	ScannedFiles    int
+	UnchangedFiles  int
+	ProcessedLines  int
+	InsertedEntries int
+	BlankLines      int
+	InvalidLines    int
+	UnfinishedLines int
+	BytesRead       int64
+	LineLimitHit    bool
+}
+
+type fileScanResult struct {
+	ScannedFiles    int
+	UnchangedFiles  int
+	ProcessedLines  int
+	InsertedEntries int
+	BlankLines      int
+	InvalidLines    int
+	UnfinishedLines int
+	BytesRead       int64
+}
+
+func (s *scanStats) add(result fileScanResult) {
+	s.ScannedFiles += result.ScannedFiles
+	s.UnchangedFiles += result.UnchangedFiles
+	s.ProcessedLines += result.ProcessedLines
+	s.InsertedEntries += result.InsertedEntries
+	s.BlankLines += result.BlankLines
+	s.InvalidLines += result.InvalidLines
+	s.UnfinishedLines += result.UnfinishedLines
+	s.BytesRead += result.BytesRead
+}
+
 func Open(cfg Config, resolver TokenResolver) (*Indexer, error) {
 	if strings.TrimSpace(cfg.IndexDSN) == "" {
 		cfg.IndexDSN = "/var/lib/newapi-usage/audit.db"
@@ -118,19 +153,23 @@ func (i *Indexer) ScanOnce(ctx context.Context) error {
 	i.scanMu.Lock()
 	defer i.scanMu.Unlock()
 
+	started := time.Now()
 	paths, err := expandGlob(i.cfg.LogGlob)
 	if err != nil {
 		i.setLastScanError(err)
 		return err
 	}
+	stats := scanStats{MatchedFiles: len(paths)}
 	var firstErr error
 	remaining := i.cfg.MaxLinesPerScan
 	for _, path := range paths {
 		if remaining <= 0 {
+			stats.LineLimitHit = true
 			break
 		}
-		processed, err := i.ingestPath(ctx, path, remaining)
-		remaining -= processed
+		result, err := i.ingestPath(ctx, path, remaining)
+		stats.add(result)
+		remaining -= result.ProcessedLines
 		if err != nil {
 			slog.Warn("audit ingest failed", "path", path, "error", err)
 			if firstErr == nil {
@@ -139,6 +178,26 @@ func (i *Indexer) ScanOnce(ctx context.Context) error {
 		}
 	}
 	i.setLastScanError(firstErr)
+	attrs := []any{
+		"glob", i.cfg.LogGlob,
+		"matched_files", stats.MatchedFiles,
+		"scanned_files", stats.ScannedFiles,
+		"unchanged_files", stats.UnchangedFiles,
+		"processed_lines", stats.ProcessedLines,
+		"inserted_entries", stats.InsertedEntries,
+		"blank_lines", stats.BlankLines,
+		"invalid_lines", stats.InvalidLines,
+		"unfinished_lines", stats.UnfinishedLines,
+		"bytes_read", stats.BytesRead,
+		"line_limit_hit", stats.LineLimitHit,
+		"duration_ms", time.Since(started).Milliseconds(),
+	}
+	if firstErr != nil {
+		attrs = append(attrs, "error", firstErr)
+		slog.Warn("audit scan completed", attrs...)
+	} else {
+		slog.Info("audit scan completed", attrs...)
+	}
 	return firstErr
 }
 
@@ -148,6 +207,23 @@ func (i *Indexer) Lookup(ctx context.Context, filter LookupFilter) ([]Entry, err
 	}
 	if filter.Limit <= 0 || filter.Limit > 50 {
 		filter.Limit = 10
+	}
+	if filter.TokenID > 0 && filter.CreatedAt > 0 {
+		window := int64(i.cfg.LookupWindow.Seconds())
+		if window <= 0 {
+			window = 120
+		}
+		items, err := i.lookupByTokenWindow(ctx, filter, window)
+		if err != nil {
+			return nil, err
+		}
+		if len(items) > 0 {
+			for idx := range items {
+				items[idx].MatchedBy = "token_time"
+				items[idx].MatchedNote = fmt.Sprintf("same token within +/- %ds; model match is ranked first", window)
+			}
+			return items, nil
+		}
 	}
 	if strings.TrimSpace(filter.RequestID) != "" {
 		items, err := i.lookupByRequestID(ctx, filter.RequestID, filter.Limit)
@@ -162,20 +238,16 @@ func (i *Indexer) Lookup(ctx context.Context, filter LookupFilter) ([]Entry, err
 			return items, nil
 		}
 	}
-	if filter.TokenID <= 0 || filter.CreatedAt <= 0 {
+	if filter.TokenID <= 0 {
 		return []Entry{}, nil
 	}
-	window := int64(i.cfg.LookupWindow.Seconds())
-	if window <= 0 {
-		window = 120
-	}
-	items, err := i.lookupByTokenWindow(ctx, filter, window)
+	items, err := i.lookupLatestByToken(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
 	for idx := range items {
-		items[idx].MatchedBy = "token_time"
-		items[idx].MatchedNote = fmt.Sprintf("token/model within +/- %ds", window)
+		items[idx].MatchedBy = "token_latest"
+		items[idx].MatchedNote = "audit log has no usable timestamp match; newest same-token candidates are shown with model match ranked first"
 	}
 	return items, nil
 }
@@ -233,6 +305,7 @@ func (i *Indexer) initSchema(ctx context.Context) error {
 			key_tail TEXT NOT NULL DEFAULT '',
 			key_hash TEXT NOT NULL DEFAULT '',
 			request_id TEXT NOT NULL DEFAULT '',
+			has_timestamp INTEGER NOT NULL DEFAULT 0,
 			body TEXT NOT NULL,
 			UNIQUE(source_id, source_line)
 		)`,
@@ -245,65 +318,73 @@ func (i *Indexer) initSchema(ctx context.Context) error {
 			return err
 		}
 	}
+	if _, err := i.db.ExecContext(ctx, `ALTER TABLE audit_entries ADD COLUMN has_timestamp INTEGER NOT NULL DEFAULT 0`); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+		return err
+	}
 	return nil
 }
 
-func (i *Indexer) ingestPath(ctx context.Context, path string, maxLines int) (int, error) {
+func (i *Indexer) ingestPath(ctx context.Context, path string, maxLines int) (fileScanResult, error) {
+	result := fileScanResult{}
 	info, err := os.Stat(path)
 	if err != nil {
-		return 0, err
+		return result, err
 	}
 	if info.IsDir() {
-		return 0, nil
+		return result, nil
 	}
+	result.ScannedFiles = 1
 	identity := fileIdentity(path, info)
 	state, err := i.stateForPath(ctx, path, identity, info.Size())
 	if err != nil {
-		return 0, err
+		return result, err
 	}
 	if info.Size() <= state.Offset {
-		return 0, i.touchState(ctx, state, info.Size())
+		result.UnchangedFiles = 1
+		return result, i.touchState(ctx, state, info.Size())
 	}
 
 	file, err := os.Open(path)
 	if err != nil {
-		return 0, err
+		return result, err
 	}
 	defer file.Close()
 	if _, err := file.Seek(state.Offset, io.SeekStart); err != nil {
-		return 0, err
+		return result, err
 	}
 
 	reader := bufio.NewReaderSize(file, 256*1024)
 	sourceID := fmt.Sprintf("%s:%d", state.FileID, state.Generation)
 	offset := state.Offset
 	lineNo := state.LineNo
-	processed := 0
 
 	tx, err := i.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, err
+		return result, err
 	}
 	defer tx.Rollback()
 
 	resolveCache := make(map[string]ResolvedToken)
-	for processed < maxLines {
+	for result.ProcessedLines < maxLines {
 		startOffset := offset
 		line, err := reader.ReadString('\n')
 		if len(line) == 0 && errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil && !errors.Is(err, io.EOF) {
-			return processed, err
+			return result, err
 		}
 		if errors.Is(err, io.EOF) && !strings.HasSuffix(line, "\n") {
+			result.UnfinishedLines++
 			break
 		}
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
 			offset += int64(len(line))
 			lineNo++
-			processed++
+			result.ProcessedLines++
+			result.BlankLines++
+			result.BytesRead += int64(len(line))
 			if errors.Is(err, io.EOF) {
 				break
 			}
@@ -311,19 +392,23 @@ func (i *Indexer) ingestPath(ctx context.Context, path string, maxLines int) (in
 		}
 		record, parseErr := parseLine(trimmed)
 		if parseErr != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
 			offset += int64(len(line))
 			lineNo++
-			processed++
+			result.ProcessedLines++
+			result.InvalidLines++
+			result.BytesRead += int64(len(line))
 			continue
 		}
 		lineNo++
 		offset += int64(len(line))
-		processed++
-		if err := i.insertEntry(ctx, tx, sourceID, path, lineNo, startOffset, record, resolveCache); err != nil {
-			return processed, err
+		result.ProcessedLines++
+		result.BytesRead += int64(len(line))
+		inserted, err := i.insertEntry(ctx, tx, sourceID, path, lineNo, startOffset, record, resolveCache)
+		if err != nil {
+			return result, err
+		}
+		if inserted {
+			result.InsertedEntries++
 		}
 		if errors.Is(err, io.EOF) {
 			break
@@ -332,15 +417,15 @@ func (i *Indexer) ingestPath(ctx context.Context, path string, maxLines int) (in
 
 	now := time.Now().Unix()
 	if _, err := tx.ExecContext(ctx, `UPDATE audit_files SET size = ?, offset = ?, line_no = ?, last_seen_at = ?, updated_at = ? WHERE id = ?`, info.Size(), offset, lineNo, now, now, state.ID); err != nil {
-		return processed, err
+		return result, err
 	}
 	if err := tx.Commit(); err != nil {
-		return processed, err
+		return result, err
 	}
-	return processed, nil
+	return result, nil
 }
 
-func (i *Indexer) insertEntry(ctx context.Context, tx *sql.Tx, sourceID string, path string, lineNo int64, offset int64, record parsedRecord, resolveCache map[string]ResolvedToken) error {
+func (i *Indexer) insertEntry(ctx context.Context, tx *sql.Tx, sourceID string, path string, lineNo int64, offset int64, record parsedRecord, resolveCache map[string]ResolvedToken) (bool, error) {
 	keyHash := ""
 	keyTail := ""
 	tokenID := int64(0)
@@ -364,10 +449,10 @@ func (i *Indexer) insertEntry(ctx context.Context, tx *sql.Tx, sourceID string, 
 			}
 		}
 	}
-	_, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO audit_entries (
+	result, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO audit_entries (
 		source_id, source_path, source_line, byte_offset, created_at, ingested_at,
-		method, path, model, token_id, key_tail, key_hash, request_id, body
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		method, path, model, token_id, key_tail, key_hash, request_id, has_timestamp, body
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		sourceID,
 		path,
 		lineNo,
@@ -381,9 +466,14 @@ func (i *Indexer) insertEntry(ctx context.Context, tx *sql.Tx, sourceID string, 
 		keyTail,
 		keyHash,
 		record.RequestID,
+		record.HasTimestamp,
 		record.Body,
 	)
-	return err
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows > 0, err
 }
 
 func (i *Indexer) stateForPath(ctx context.Context, path string, fileID string, size int64) (fileState, error) {
@@ -434,7 +524,7 @@ func (i *Indexer) touchState(ctx context.Context, state fileState, size int64) e
 }
 
 func (i *Indexer) lookupByRequestID(ctx context.Context, requestID string, limit int) ([]Entry, error) {
-	rows, err := i.db.QueryContext(ctx, `SELECT id, created_at, ingested_at, source_path, source_line, byte_offset, method, path, model, token_id, key_tail, key_hash, request_id, body
+	rows, err := i.db.QueryContext(ctx, `SELECT id, created_at, ingested_at, source_path, source_line, byte_offset, method, path, model, token_id, key_tail, key_hash, request_id, has_timestamp, body
 		FROM audit_entries
 		WHERE request_id = ?
 		ORDER BY id DESC
@@ -447,18 +537,41 @@ func (i *Indexer) lookupByRequestID(ctx context.Context, requestID string, limit
 }
 
 func (i *Indexer) lookupByTokenWindow(ctx context.Context, filter LookupFilter, window int64) ([]Entry, error) {
+	model := strings.TrimSpace(filter.Model)
 	args := []any{filter.TokenID, filter.CreatedAt - window, filter.CreatedAt + window}
-	conditions := []string{"token_id = ?", "created_at >= ?", "created_at <= ?"}
-	if strings.TrimSpace(filter.Model) != "" {
-		args = append(args, strings.TrimSpace(filter.Model))
-		conditions = append(conditions, "model = ?")
+	modelOrder := "CASE WHEN 1=1 THEN 0 ELSE 0 END"
+	if model != "" {
+		args = append(args, model)
+		modelOrder = "CASE WHEN model = ? THEN 0 ELSE 1 END"
 	}
 	args = append(args, filter.CreatedAt, filter.Limit)
-	query := fmt.Sprintf(`SELECT id, created_at, ingested_at, source_path, source_line, byte_offset, method, path, model, token_id, key_tail, key_hash, request_id, body
+	query := fmt.Sprintf(`SELECT id, created_at, ingested_at, source_path, source_line, byte_offset, method, path, model, token_id, key_tail, key_hash, request_id, has_timestamp, body
 		FROM audit_entries
-		WHERE %s
-		ORDER BY ABS(created_at - ?) ASC, id DESC
-		LIMIT ?`, strings.Join(conditions, " AND "))
+		WHERE token_id = ? AND has_timestamp = 1 AND created_at >= ? AND created_at <= ?
+		ORDER BY %s ASC, ABS(created_at - ?) ASC, id DESC
+		LIMIT ?`, modelOrder)
+	rows, err := i.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanEntries(rows)
+}
+
+func (i *Indexer) lookupLatestByToken(ctx context.Context, filter LookupFilter) ([]Entry, error) {
+	model := strings.TrimSpace(filter.Model)
+	args := []any{filter.TokenID}
+	modelOrder := "CASE WHEN 1=1 THEN 0 ELSE 0 END"
+	if model != "" {
+		args = append(args, model)
+		modelOrder = "CASE WHEN model = ? THEN 0 ELSE 1 END"
+	}
+	args = append(args, filter.Limit)
+	query := fmt.Sprintf(`SELECT id, created_at, ingested_at, source_path, source_line, byte_offset, method, path, model, token_id, key_tail, key_hash, request_id, has_timestamp, body
+		FROM audit_entries
+		WHERE token_id = ?
+		ORDER BY %s ASC, id DESC
+		LIMIT ?`, modelOrder)
 	rows, err := i.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -485,6 +598,7 @@ func scanEntries(rows *sql.Rows) ([]Entry, error) {
 			&item.KeyTail,
 			&item.KeyHash,
 			&item.RequestID,
+			&item.HasTimestamp,
 			&item.Body,
 		); err != nil {
 			return nil, err

@@ -98,6 +98,49 @@ func TestIndexerSkipsUnfinishedLine(t *testing.T) {
 	assertIndexedRows(t, idx, 1)
 }
 
+func TestIndexerNoTimestampFallsBackToLatestTokenCandidate(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "request-body.jsonl")
+	indexPath := filepath.Join(dir, "audit.db")
+	line := `{"method":"POST","path":"/v1/chat/completions","headers":{"authorization":"Bearer sk-prod"},"body":{"model":"gpt-4o","messages":[{"role":"user","content":"no timestamp"}]}}` + "\n"
+	if err := os.WriteFile(logPath, []byte(line), 0600); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+
+	idx, err := Open(Config{
+		LogGlob:         filepath.Join(dir, "*.jsonl"),
+		IndexDSN:        indexPath,
+		MaxLinesPerScan: 100,
+	}, func(key string) (ResolvedToken, error) {
+		return ResolvedToken{TokenID: 7, KeyTail: "sk-prod"}, nil
+	})
+	if err != nil {
+		t.Fatalf("open indexer: %v", err)
+	}
+	defer idx.Close()
+
+	if err := idx.ScanOnce(context.Background()); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+
+	items, err := idx.Lookup(context.Background(), LookupFilter{TokenID: 7, Model: "gpt-4o", CreatedAt: 1000})
+	if err != nil {
+		t.Fatalf("lookup: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("items len = %d", len(items))
+	}
+	if items[0].HasTimestamp {
+		t.Fatalf("expected no timestamp: %+v", items[0])
+	}
+	if items[0].MatchedBy != "token_latest" {
+		t.Fatalf("matched_by = %q", items[0].MatchedBy)
+	}
+	if items[0].Messages[0].Content != "no timestamp" {
+		t.Fatalf("unexpected messages: %+v", items[0].Messages)
+	}
+}
+
 func assertIndexedRows(t *testing.T, idx *Indexer, want int64) {
 	t.Helper()
 	status, err := idx.Status(context.Background())
