@@ -99,6 +99,25 @@ AUDIT_LOOKUP_WINDOW_SECONDS=120
 AUDIT_MAX_LINES_PER_SCAN=50000
 ```
 
+The OpenResty audit script must write the request arrival time. This repository includes a ready-to-use example:
+
+- `deploy/openresty/audit.lua`
+- `deploy/openresty/newapi-audit.conf`
+
+Create the audit directory on the host and make it writable by OpenResty:
+
+```bash
+mkdir -p /home/asants/newapi/new-api/audit-logs
+```
+
+The JSONL record should contain `time` from `ngx.now()`:
+
+```json
+{"time":1781023147.123,"method":"POST","path":"/v1/chat/completions","headers":{"authorization":"Bearer sk-..."},"body":{"model":"gpt-4o","messages":[]}}
+```
+
+The example Lua writes to `/var/log/audit/request-body.jsonl`. Keep using your existing logrotate setup for file rotation.
+
 The importer stores an incremental cursor for each JSONL file in SQLite. It scans the glob periodically, imports new files from offset `0`, continues existing files from their last byte offset, and resets the cursor if a file is truncated or replaced.
 
 The SQLite index stores request bodies plus token ID, key tail, key hash, model, request path, and source file position. It does not store the full API key.
@@ -109,7 +128,7 @@ Matching order in the UI:
 2. `logs.request_id` to audit `request_id`, only if the audit JSONL explicitly contains a compatible request ID.
 3. Latest rows with the same `token_id`, with the same model ranked first.
 
-If the JSONL has no timestamp field, the service can still show same-token candidates, but it cannot uniquely identify the exact request when the same key has concurrent or high-frequency traffic. Add a timestamp such as `time`, `timestamp`, or `created_at` to the OpenResty JSONL for better matching.
+If the JSONL has no timestamp field, the service can still show same-token candidates, but it cannot uniquely identify the exact request when the same key has concurrent or high-frequency traffic. Use the included OpenResty Lua script or add a timestamp such as `time`, `timestamp`, or `created_at` to your existing JSONL writer.
 
 Only request bodies are shown. Model response text is not available unless the OpenResty audit layer also records response bodies.
 
