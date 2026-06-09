@@ -142,8 +142,7 @@ func TestIndexerNoTimestampFallsBackToLatestTokenCandidate(t *testing.T) {
 	}
 }
 
-func TestIndexerParsesOpenRestyLocalTime(t *testing.T) {
-	t.Setenv("TZ", "Asia/Shanghai")
+func TestIndexerParsesOpenRestyLocalTimeWithConfiguredTimezone(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "request-body.jsonl")
 	indexPath := filepath.Join(dir, "audit.db")
@@ -155,6 +154,7 @@ func TestIndexerParsesOpenRestyLocalTime(t *testing.T) {
 	idx, err := Open(Config{
 		LogGlob:         filepath.Join(dir, "*.jsonl"),
 		IndexDSN:        indexPath,
+		TimeZone:        "UTC",
 		MaxLinesPerScan: 100,
 	}, func(key string) (ResolvedToken, error) {
 		return ResolvedToken{TokenID: 7, KeyTail: "sk-prod"}, nil
@@ -168,7 +168,7 @@ func TestIndexerParsesOpenRestyLocalTime(t *testing.T) {
 		t.Fatalf("scan: %v", err)
 	}
 
-	location, err := time.LoadLocation("Asia/Shanghai")
+	location, err := time.LoadLocation("UTC")
 	if err != nil {
 		t.Fatalf("load location: %v", err)
 	}
@@ -185,6 +185,52 @@ func TestIndexerParsesOpenRestyLocalTime(t *testing.T) {
 	}
 	if items[0].CreatedAt != createdAt {
 		t.Fatalf("created_at = %d, want %d", items[0].CreatedAt, createdAt)
+	}
+}
+
+func TestLookupUsesEstimatedRequestStartTime(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "request-body.jsonl")
+	indexPath := filepath.Join(dir, "audit.db")
+	line := `{"time":1000,"method":"POST","path":"/v1/chat/completions","headers":{"authorization":"Bearer sk-prod"},"body":{"model":"gpt-4o","messages":[{"role":"user","content":"start time"}]}}` + "\n"
+	if err := os.WriteFile(logPath, []byte(line), 0600); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+
+	idx, err := Open(Config{
+		LogGlob:         filepath.Join(dir, "*.jsonl"),
+		IndexDSN:        indexPath,
+		LookupWindow:    2 * time.Second,
+		MaxLinesPerScan: 100,
+	}, func(key string) (ResolvedToken, error) {
+		return ResolvedToken{TokenID: 7, KeyTail: "sk-prod"}, nil
+	})
+	if err != nil {
+		t.Fatalf("open indexer: %v", err)
+	}
+	defer idx.Close()
+
+	if err := idx.ScanOnce(context.Background()); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+
+	items, err := idx.Lookup(context.Background(), LookupFilter{TokenID: 7, Model: "gpt-4o", CreatedAt: 1010, UseTime: 10})
+	if err != nil {
+		t.Fatalf("lookup: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("items len = %d", len(items))
+	}
+	if items[0].MatchedBy != "token_time" {
+		t.Fatalf("matched_by = %q", items[0].MatchedBy)
+	}
+
+	items, err = idx.Lookup(context.Background(), LookupFilter{TokenID: 7, Model: "gpt-4o", CreatedAt: 1010})
+	if err != nil {
+		t.Fatalf("lookup without use time: %v", err)
+	}
+	if len(items) != 1 || items[0].MatchedBy != "token_latest" {
+		t.Fatalf("expected latest fallback without use time, got %+v", items)
 	}
 }
 

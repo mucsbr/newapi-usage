@@ -5,6 +5,7 @@ import "time"
 type Config struct {
 	LogGlob         string
 	IndexDSN        string
+	TimeZone        string
 	ScanInterval    time.Duration
 	LookupWindow    time.Duration
 	MaxLinesPerScan int
@@ -49,6 +50,7 @@ type LookupFilter struct {
 	TokenID   int64
 	Model     string
 	CreatedAt int64
+	UseTime   int64
 	Limit     int
 }
 
@@ -56,6 +58,7 @@ type Status struct {
 	Enabled        bool   `json:"enabled"`
 	LogGlob        string `json:"log_glob"`
 	IndexDSN       string `json:"index_dsn"`
+	TimeZone       string `json:"audit_timezone"`
 	ScanInterval   int64  `json:"scan_interval_seconds"`
 	LookupWindow   int64  `json:"lookup_window_seconds"`
 	TrackedFiles   int64  `json:"tracked_files"`

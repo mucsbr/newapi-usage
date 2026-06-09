@@ -27,6 +27,7 @@ type Config struct {
 	ShowFullKeys         bool
 	AuditLogGlob         string
 	AuditIndexDSN        string
+	AuditTimezone        string
 	AuditScanInterval    time.Duration
 	AuditLookupWindow    time.Duration
 	AuditMaxLinesPerScan int
@@ -43,6 +44,7 @@ func Load() (Config, error) {
 		ShowFullKeys:         getEnvBool("SHOW_FULL_KEYS", false),
 		AuditLogGlob:         firstEnv("AUDIT_LOG_GLOB", "AUDIT_LOG_PATHS"),
 		AuditIndexDSN:        getEnv("AUDIT_INDEX_DSN", "/var/lib/newapi-usage/audit.db"),
+		AuditTimezone:        getEnv("AUDIT_TIMEZONE", "UTC"),
 		AuditScanInterval:    time.Duration(getEnvInt("AUDIT_SCAN_INTERVAL_SECONDS", 10)) * time.Second,
 		AuditLookupWindow:    time.Duration(getEnvInt("AUDIT_LOOKUP_WINDOW_SECONDS", 120)) * time.Second,
 		AuditMaxLinesPerScan: getEnvInt("AUDIT_MAX_LINES_PER_SCAN", 50000),

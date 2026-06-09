@@ -10,7 +10,7 @@ import (
 	_ "time/tzdata"
 )
 
-func parseLine(line string) (parsedRecord, error) {
+func parseLine(line string, location *time.Location) (parsedRecord, error) {
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(line), &obj); err != nil {
 		return parsedRecord{}, err
@@ -21,7 +21,7 @@ func parseLine(line string) (parsedRecord, error) {
 	body := extractBody(obj)
 	bodyObj := parseJSONObject(body)
 
-	createdAt, hasTimestamp := extractTimestamp(obj)
+	createdAt, hasTimestamp := extractTimestamp(obj, location)
 	record := parsedRecord{
 		CreatedAt:    createdAt,
 		HasTimestamp: hasTimestamp,
@@ -124,20 +124,20 @@ func usableKey(value string) bool {
 	return lower != "[redacted]" && lower != "redacted" && lower != "***" && lower != "-"
 }
 
-func extractTimestamp(obj map[string]json.RawMessage) (int64, bool) {
+func extractTimestamp(obj map[string]json.RawMessage, location *time.Location) (int64, bool) {
 	for _, key := range []string{"created_at", "createdAt", "timestamp", "time", "ts", "@timestamp"} {
 		raw, ok := getRaw(obj, key)
 		if !ok || len(raw) == 0 || string(raw) == "null" {
 			continue
 		}
-		if ts := parseTimestamp(raw); ts > 0 {
+		if ts := parseTimestamp(raw, location); ts > 0 {
 			return ts, true
 		}
 	}
 	return 0, false
 }
 
-func parseTimestamp(raw json.RawMessage) int64 {
+func parseTimestamp(raw json.RawMessage, location *time.Location) int64 {
 	var number json.Number
 	if err := json.Unmarshal(raw, &number); err == nil {
 		if value, err := number.Int64(); err == nil {
@@ -175,7 +175,9 @@ func parseTimestamp(raw json.RawMessage) int64 {
 			return parsed.Unix()
 		}
 	}
-	location := timestampLocation()
+	if location == nil {
+		location = timestampLocation("")
+	}
 	for _, layout := range []string{
 		"2006-01-02T15:04:05",
 		"2006-01-02 15:04:05",
@@ -188,8 +190,26 @@ func parseTimestamp(raw json.RawMessage) int64 {
 	return 0
 }
 
-func timestampLocation() *time.Location {
-	tz := strings.TrimSpace(os.Getenv("TZ"))
+func loadTimeLocation(tz string) (*time.Location, error) {
+	tz = strings.TrimSpace(tz)
+	if tz == "" {
+		return timestampLocation(""), nil
+	}
+	location, err := time.LoadLocation(tz)
+	if err != nil {
+		return nil, err
+	}
+	return location, nil
+}
+
+func timestampLocation(tz string) *time.Location {
+	tz = strings.TrimSpace(tz)
+	if tz == "" {
+		tz = strings.TrimSpace(os.Getenv("AUDIT_TIMEZONE"))
+	}
+	if tz == "" {
+		tz = strings.TrimSpace(os.Getenv("TZ"))
+	}
 	if tz != "" {
 		if location, err := time.LoadLocation(tz); err == nil {
 			return location

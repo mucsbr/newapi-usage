@@ -22,9 +22,10 @@ import (
 )
 
 type Indexer struct {
-	db       *sql.DB
-	cfg      Config
-	resolver TokenResolver
+	db           *sql.DB
+	cfg          Config
+	resolver     TokenResolver
+	timeLocation *time.Location
 
 	scanMu sync.Mutex
 	wg     sync.WaitGroup
@@ -92,6 +93,10 @@ func Open(cfg Config, resolver TokenResolver) (*Indexer, error) {
 	if cfg.MaxLinesPerScan <= 0 {
 		cfg.MaxLinesPerScan = 50000
 	}
+	location, err := loadTimeLocation(cfg.TimeZone)
+	if err != nil {
+		return nil, err
+	}
 	if err := ensureIndexParent(cfg.IndexDSN); err != nil {
 		return nil, err
 	}
@@ -101,7 +106,7 @@ func Open(cfg Config, resolver TokenResolver) (*Indexer, error) {
 	}
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
-	idx := &Indexer{db: db, cfg: cfg, resolver: resolver}
+	idx := &Indexer{db: db, cfg: cfg, resolver: resolver, timeLocation: location}
 	if err := idx.initSchema(context.Background()); err != nil {
 		db.Close()
 		return nil, err
@@ -213,6 +218,7 @@ func (i *Indexer) Lookup(ctx context.Context, filter LookupFilter) ([]Entry, err
 		if window <= 0 {
 			window = 120
 		}
+		center := lookupCenter(filter)
 		items, err := i.lookupByTokenWindow(ctx, filter, window)
 		if err != nil {
 			return nil, err
@@ -220,7 +226,7 @@ func (i *Indexer) Lookup(ctx context.Context, filter LookupFilter) ([]Entry, err
 		if len(items) > 0 {
 			for idx := range items {
 				items[idx].MatchedBy = "token_time"
-				items[idx].MatchedNote = fmt.Sprintf("same token within +/- %ds; model match is ranked first", window)
+				items[idx].MatchedNote = fmt.Sprintf("same token within +/- %ds around estimated request start %d; model match is ranked first", window, center)
 			}
 			return items, nil
 		}
@@ -260,6 +266,7 @@ func (i *Indexer) Status(ctx context.Context) (Status, error) {
 		Enabled:      i.Enabled(),
 		LogGlob:      i.cfg.LogGlob,
 		IndexDSN:     i.cfg.IndexDSN,
+		TimeZone:     i.cfg.TimeZone,
 		ScanInterval: int64(i.cfg.ScanInterval.Seconds()),
 		LookupWindow: int64(i.cfg.LookupWindow.Seconds()),
 	}
@@ -390,7 +397,7 @@ func (i *Indexer) ingestPath(ctx context.Context, path string, maxLines int) (fi
 			}
 			continue
 		}
-		record, parseErr := parseLine(trimmed)
+		record, parseErr := parseLine(trimmed, i.timeLocation)
 		if parseErr != nil {
 			offset += int64(len(line))
 			lineNo++
@@ -538,17 +545,18 @@ func (i *Indexer) lookupByRequestID(ctx context.Context, requestID string, limit
 
 func (i *Indexer) lookupByTokenWindow(ctx context.Context, filter LookupFilter, window int64) ([]Entry, error) {
 	model := strings.TrimSpace(filter.Model)
-	args := []any{filter.TokenID, filter.CreatedAt - window, filter.CreatedAt + window}
+	center := lookupCenter(filter)
+	args := []any{filter.TokenID, center - window, center + window}
 	modelOrder := "CASE WHEN 1=1 THEN 0 ELSE 0 END"
 	if model != "" {
 		args = append(args, model)
 		modelOrder = "CASE WHEN model = ? THEN 0 ELSE 1 END"
 	}
-	args = append(args, filter.CreatedAt, filter.Limit)
+	args = append(args, center, filter.CreatedAt, filter.Limit)
 	query := fmt.Sprintf(`SELECT id, created_at, ingested_at, source_path, source_line, byte_offset, method, path, model, token_id, key_tail, key_hash, request_id, has_timestamp, body
 		FROM audit_entries
 		WHERE token_id = ? AND has_timestamp = 1 AND created_at >= ? AND created_at <= ?
-		ORDER BY %s ASC, ABS(created_at - ?) ASC, id DESC
+		ORDER BY %s ASC, ABS(created_at - ?) ASC, ABS(created_at - ?) ASC, id DESC
 		LIMIT ?`, modelOrder)
 	rows, err := i.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -556,6 +564,16 @@ func (i *Indexer) lookupByTokenWindow(ctx context.Context, filter LookupFilter, 
 	}
 	defer rows.Close()
 	return scanEntries(rows)
+}
+
+func lookupCenter(filter LookupFilter) int64 {
+	if filter.CreatedAt <= 0 {
+		return 0
+	}
+	if filter.UseTime > 0 && filter.UseTime < 24*60*60 {
+		return filter.CreatedAt - filter.UseTime
+	}
+	return filter.CreatedAt
 }
 
 func (i *Indexer) lookupLatestByToken(ctx context.Context, filter LookupFilter) ([]Entry, error) {

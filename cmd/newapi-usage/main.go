@@ -38,6 +38,7 @@ func main() {
 		aud, err := audit.Open(audit.Config{
 			LogGlob:         cfg.AuditLogGlob,
 			IndexDSN:        cfg.AuditIndexDSN,
+			TimeZone:        cfg.AuditTimezone,
 			ScanInterval:    cfg.AuditScanInterval,
 			LookupWindow:    cfg.AuditLookupWindow,
 			MaxLinesPerScan: cfg.AuditMaxLinesPerScan,
@@ -85,6 +86,7 @@ func main() {
 			"show_full_keys", cfg.ShowFullKeys,
 			"audit_enabled", auditIndex != nil && auditIndex.Enabled(),
 			"audit_glob", cfg.AuditLogGlob,
+			"audit_timezone", cfg.AuditTimezone,
 		)
 		if err := httpServer.ListenAndServe(); err != nil && !server.IsServerClosed(err) {
 			slog.Error("server failed", "error", err)

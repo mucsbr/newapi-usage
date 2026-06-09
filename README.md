@@ -94,6 +94,7 @@ If OpenResty writes request bodies as JSONL, mount that directory and enable the
 AUDIT_LOG_DIR=/home/asants/newapi/new-api/audit-logs
 AUDIT_LOG_GLOB=/audit-logs/*.jsonl
 AUDIT_INDEX_DSN=/var/lib/newapi-usage/audit.db
+AUDIT_TIMEZONE=UTC
 AUDIT_SCAN_INTERVAL_SECONDS=10
 AUDIT_LOOKUP_WINDOW_SECONDS=120
 AUDIT_MAX_LINES_PER_SCAN=50000
@@ -105,7 +106,15 @@ The JSONL record should contain request arrival time. The existing OpenResty Lua
 {"time":"2026-06-10 12:34:56","method":"POST","path":"/v1/chat/completions","headers":{"authorization":"Bearer sk-..."},"body":{"model":"gpt-4o","messages":[]}}
 ```
 
-The importer also accepts Unix seconds/milliseconds and RFC3339 timestamps. For local-time strings from `ngx.localtime()`, parsing uses the container `TZ` setting.
+The importer also accepts Unix seconds/milliseconds and RFC3339 timestamps. For local-time strings from `ngx.localtime()`, parsing uses `AUDIT_TIMEZONE`.
+
+If the JSONL `time` is 8 hours behind China time, OpenResty is writing UTC local time. Keep `TZ=Asia/Shanghai` for this service, but set:
+
+```env
+AUDIT_TIMEZONE=UTC
+```
+
+If OpenResty writes China local time, set `AUDIT_TIMEZONE=Asia/Shanghai`.
 
 The importer stores an incremental cursor for each JSONL file in SQLite. It scans the glob periodically, imports new files from offset `0`, continues existing files from their last byte offset, and resets the cursor if a file is truncated or replaced.
 
@@ -113,7 +122,7 @@ The SQLite index stores request bodies plus token ID, key tail, key hash, model,
 
 Matching order in the UI:
 
-1. `logs.token_id + logs.created_at` against timestamped audit rows, with the same model ranked first.
+1. `logs.token_id + (logs.created_at - logs.use_time)` against timestamped audit rows, with the same model ranked first. `AUDIT_LOOKUP_WINDOW_SECONDS` is applied around that estimated request start time.
 2. `logs.request_id` to audit `request_id`, only if the audit JSONL explicitly contains a compatible request ID.
 3. Latest rows with the same `token_id`, with the same model ranked first.
 

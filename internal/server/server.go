@@ -180,6 +180,7 @@ func (s *Server) handleLogSubroutes(w http.ResponseWriter, r *http.Request) {
 		TokenID:   logItem.TokenID,
 		Model:     logItem.ModelName,
 		CreatedAt: logItem.CreatedAt,
+		UseTime:   logItem.UseTime,
 		Limit:     10,
 	})
 	if err != nil {
