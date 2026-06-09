@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mucsbr/newapi-usage/internal/audit"
 	"github.com/mucsbr/newapi-usage/internal/config"
 	"github.com/mucsbr/newapi-usage/internal/server"
 	"github.com/mucsbr/newapi-usage/internal/store"
@@ -31,7 +32,43 @@ func main() {
 	}
 	defer st.Close()
 
-	app := server.New(st)
+	var auditIndex *audit.Indexer
+	stopAudit := func() {}
+	if cfg.AuditLogGlob != "" {
+		aud, err := audit.Open(audit.Config{
+			LogGlob:         cfg.AuditLogGlob,
+			IndexDSN:        cfg.AuditIndexDSN,
+			ScanInterval:    cfg.AuditScanInterval,
+			LookupWindow:    cfg.AuditLookupWindow,
+			MaxLinesPerScan: cfg.AuditMaxLinesPerScan,
+		}, func(key string) (audit.ResolvedToken, error) {
+			token, err := st.ResolveTokenByKey(key)
+			if err != nil {
+				return audit.ResolvedToken{}, err
+			}
+			return audit.ResolvedToken{
+				TokenID: token.TokenID,
+				Name:    token.Name,
+				KeyTail: token.KeyTail,
+			}, nil
+		})
+		if err != nil {
+			slog.Error("audit index failed", "error", err)
+			os.Exit(1)
+		}
+		auditIndex = aud
+		auditCtx, cancelAudit := context.WithCancel(context.Background())
+		stopAudit = cancelAudit
+		auditIndex.Start(auditCtx)
+		defer func() {
+			stopAudit()
+			if err := auditIndex.Close(); err != nil {
+				slog.Error("audit index close failed", "error", err)
+			}
+		}()
+	}
+
+	app := server.New(st, auditIndex)
 	httpServer := &http.Server{
 		Addr:              cfg.Addr(),
 		Handler:           app.Handler(),
@@ -46,6 +83,8 @@ func main() {
 			"addr", cfg.Addr(),
 			"driver", cfg.DBDriver,
 			"show_full_keys", cfg.ShowFullKeys,
+			"audit_enabled", auditIndex != nil && auditIndex.Enabled(),
+			"audit_glob", cfg.AuditLogGlob,
 		)
 		if err := httpServer.ListenAndServe(); err != nil && !server.IsServerClosed(err) {
 			slog.Error("server failed", "error", err)
@@ -57,6 +96,7 @@ func main() {
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
 
+	stopAudit()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := httpServer.Shutdown(ctx); err != nil {

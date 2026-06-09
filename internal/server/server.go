@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mucsbr/newapi-usage/internal/audit"
 	"github.com/mucsbr/newapi-usage/internal/store"
 )
 
@@ -20,11 +21,12 @@ var embeddedFiles embed.FS
 
 type Server struct {
 	store *store.Store
+	audit *audit.Indexer
 	mux   *http.ServeMux
 }
 
-func New(st *store.Store) *Server {
-	s := &Server{store: st, mux: http.NewServeMux()}
+func New(st *store.Store, aud *audit.Indexer) *Server {
+	s := &Server{store: st, audit: aud, mux: http.NewServeMux()}
 	s.routes()
 	return s
 }
@@ -43,6 +45,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/summary", s.handleSummary)
 	s.mux.HandleFunc("/api/keys", s.handleKeys)
 	s.mux.HandleFunc("/api/logs", s.handleLogs)
+	s.mux.HandleFunc("/api/logs/", s.handleLogSubroutes)
+	s.mux.HandleFunc("/api/audit/status", s.handleAuditStatus)
 	s.mux.HandleFunc("/api/keys/", s.handleKeySubroutes)
 }
 
@@ -141,6 +145,68 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, data)
 }
 
+func (s *Server) handleLogSubroutes(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	trimmed := strings.TrimPrefix(r.URL.Path, "/api/logs/")
+	parts := strings.Split(strings.Trim(trimmed, "/"), "/")
+	if len(parts) != 2 || parts[1] != "audit" {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	logID, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || logID <= 0 {
+		writeError(w, http.StatusBadRequest, "invalid log id")
+		return
+	}
+	logItem, err := s.store.LogByID(r.Context(), logID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "log not found")
+		return
+	}
+	out := logAuditResponse{
+		Enabled: s.audit != nil && s.audit.Enabled(),
+		Log:     logItem,
+		Items:   []audit.Entry{},
+	}
+	if s.audit == nil || !s.audit.Enabled() {
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+	items, err := s.audit.Lookup(r.Context(), audit.LookupFilter{
+		RequestID: logItem.RequestID,
+		TokenID:   logItem.TokenID,
+		Model:     logItem.ModelName,
+		CreatedAt: logItem.CreatedAt,
+		Limit:     10,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	out.Items = items
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleAuditStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if s.audit == nil {
+		writeJSON(w, http.StatusOK, audit.Status{Enabled: false})
+		return
+	}
+	status, err := s.audit.Status(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
+}
+
 func parseTimeRange(r *http.Request) store.TimeRange {
 	return store.TimeRange{
 		Start: int64(queryInt(r, "start", 0)),
@@ -217,4 +283,10 @@ func (r *statusRecorder) WriteHeader(status int) {
 
 func IsServerClosed(err error) bool {
 	return errors.Is(err, http.ErrServerClosed)
+}
+
+type logAuditResponse struct {
+	Enabled bool           `json:"enabled"`
+	Log     store.UsageLog `json:"log"`
+	Items   []audit.Entry  `json:"items"`
 }

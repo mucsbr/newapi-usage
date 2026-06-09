@@ -86,6 +86,30 @@ For SQLite, mount the database file under `./data` or adjust the `docker-compose
 
 Set `SHOW_FULL_KEYS=true` only on a trusted admin-only network.
 
+## Audit Request Bodies
+
+If OpenResty writes request bodies as JSONL, mount that directory and enable the audit importer:
+
+```env
+AUDIT_LOG_DIR=/home/asants/newapi/new-api/audit-logs
+AUDIT_LOG_GLOB=/audit-logs/*.jsonl
+AUDIT_INDEX_DSN=/var/lib/newapi-usage/audit.db
+AUDIT_SCAN_INTERVAL_SECONDS=10
+AUDIT_LOOKUP_WINDOW_SECONDS=120
+AUDIT_MAX_LINES_PER_SCAN=50000
+```
+
+The importer stores an incremental cursor for each JSONL file in SQLite. It scans the glob periodically, imports new files from offset `0`, continues existing files from their last byte offset, and resets the cursor if a file is truncated or replaced.
+
+The SQLite index stores request bodies plus token ID, key tail, key hash, model, request path, and source file position. It does not store the full API key.
+
+Matching order in the UI:
+
+1. `logs.request_id` to audit `request_id`, if the JSONL contains it.
+2. Fallback to `token_id + model + created_at` within `AUDIT_LOOKUP_WINDOW_SECONDS`.
+
+Only request bodies are shown. Model response text is not available unless the OpenResty audit layer also records response bodies.
+
 ## API
 
 ```text
@@ -94,6 +118,8 @@ GET /api/summary?start=1710000000&end=1710086400
 GET /api/keys?q=name&limit=100
 GET /api/keys/{token_id}/models
 GET /api/logs?token_id=123&type=success&page=1&page_size=100
+GET /api/logs/{log_id}/audit
+GET /api/audit/status
 ```
 
 Time parameters are Unix timestamps in seconds.

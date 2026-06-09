@@ -27,7 +27,9 @@ RUN if [ -n "$APK_MIRROR" ]; then \
     sed -i "s|https://dl-cdn.alpinelinux.org/alpine|${APK_MIRROR}|g" /etc/apk/repositories; \
   fi \
   && apk add --no-cache ca-certificates \
-  && adduser -D -H -u 10001 app
+  && adduser -D -H -u 10001 app \
+  && mkdir -p /var/lib/newapi-usage \
+  && chown -R app:app /var/lib/newapi-usage
 
 COPY --from=build /out/newapi-usage /usr/local/bin/newapi-usage
 

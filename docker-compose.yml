@@ -29,10 +29,18 @@ services:
       - DB_MAX_IDLE_CONNS=${DB_MAX_IDLE_CONNS:-5}
       - QUERY_TIMEOUT_SECONDS=${QUERY_TIMEOUT_SECONDS:-30}
       - SHOW_FULL_KEYS=${SHOW_FULL_KEYS:-false}
+      - AUDIT_LOG_GLOB=${AUDIT_LOG_GLOB:-}
+      - AUDIT_INDEX_DSN=${AUDIT_INDEX_DSN:-/var/lib/newapi-usage/audit.db}
+      - AUDIT_SCAN_INTERVAL_SECONDS=${AUDIT_SCAN_INTERVAL_SECONDS:-10}
+      - AUDIT_LOOKUP_WINDOW_SECONDS=${AUDIT_LOOKUP_WINDOW_SECONDS:-120}
+      - AUDIT_MAX_LINES_PER_SCAN=${AUDIT_MAX_LINES_PER_SCAN:-50000}
       - TZ=${TZ:-Asia/Shanghai}
     volumes:
       # Mount the SQLite database here only if SQL_DSN points to /data/*.db.
       - ./data:/data:ro
+      # Set AUDIT_LOG_DIR to the host directory that contains OpenResty *.jsonl files.
+      - ${AUDIT_LOG_DIR:-./audit-logs}:/audit-logs:ro
+      - audit-index:/var/lib/newapi-usage
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
@@ -50,3 +58,6 @@ networks:
   newapi-network:
     external: true
     name: ${NEWAPI_NETWORK:-new-api_new-api-network}
+
+volumes:
+  audit-index:

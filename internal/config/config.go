@@ -17,25 +17,35 @@ const (
 )
 
 type Config struct {
-	Host           string
-	Port           int
-	SQLDSN         string
-	DBDriver       Driver
-	DBMaxOpenConns int
-	DBMaxIdleConns int
-	QueryTimeout   time.Duration
-	ShowFullKeys   bool
+	Host                 string
+	Port                 int
+	SQLDSN               string
+	DBDriver             Driver
+	DBMaxOpenConns       int
+	DBMaxIdleConns       int
+	QueryTimeout         time.Duration
+	ShowFullKeys         bool
+	AuditLogGlob         string
+	AuditIndexDSN        string
+	AuditScanInterval    time.Duration
+	AuditLookupWindow    time.Duration
+	AuditMaxLinesPerScan int
 }
 
 func Load() (Config, error) {
 	cfg := Config{
-		Host:           getEnv("HOST", "0.0.0.0"),
-		Port:           getEnvInt("PORT", 8080),
-		SQLDSN:         firstEnv("SQL_DSN", "NEWAPI_SQL_DSN", "DB_DSN"),
-		DBMaxOpenConns: getEnvInt("DB_MAX_OPEN_CONNS", 10),
-		DBMaxIdleConns: getEnvInt("DB_MAX_IDLE_CONNS", 5),
-		QueryTimeout:   time.Duration(getEnvInt("QUERY_TIMEOUT_SECONDS", 30)) * time.Second,
-		ShowFullKeys:   getEnvBool("SHOW_FULL_KEYS", false),
+		Host:                 getEnv("HOST", "0.0.0.0"),
+		Port:                 getEnvInt("PORT", 8080),
+		SQLDSN:               firstEnv("SQL_DSN", "NEWAPI_SQL_DSN", "DB_DSN"),
+		DBMaxOpenConns:       getEnvInt("DB_MAX_OPEN_CONNS", 10),
+		DBMaxIdleConns:       getEnvInt("DB_MAX_IDLE_CONNS", 5),
+		QueryTimeout:         time.Duration(getEnvInt("QUERY_TIMEOUT_SECONDS", 30)) * time.Second,
+		ShowFullKeys:         getEnvBool("SHOW_FULL_KEYS", false),
+		AuditLogGlob:         firstEnv("AUDIT_LOG_GLOB", "AUDIT_LOG_PATHS"),
+		AuditIndexDSN:        getEnv("AUDIT_INDEX_DSN", "/var/lib/newapi-usage/audit.db"),
+		AuditScanInterval:    time.Duration(getEnvInt("AUDIT_SCAN_INTERVAL_SECONDS", 10)) * time.Second,
+		AuditLookupWindow:    time.Duration(getEnvInt("AUDIT_LOOKUP_WINDOW_SECONDS", 120)) * time.Second,
+		AuditMaxLinesPerScan: getEnvInt("AUDIT_MAX_LINES_PER_SCAN", 50000),
 	}
 	if cfg.SQLDSN == "" {
 		return Config{}, fmt.Errorf("SQL_DSN is required")
@@ -64,6 +74,15 @@ func Load() (Config, error) {
 	}
 	if cfg.QueryTimeout <= 0 {
 		cfg.QueryTimeout = 30 * time.Second
+	}
+	if cfg.AuditScanInterval <= 0 {
+		cfg.AuditScanInterval = 10 * time.Second
+	}
+	if cfg.AuditLookupWindow <= 0 {
+		cfg.AuditLookupWindow = 120 * time.Second
+	}
+	if cfg.AuditMaxLinesPerScan <= 0 {
+		cfg.AuditMaxLinesPerScan = 50000
 	}
 
 	return cfg, nil

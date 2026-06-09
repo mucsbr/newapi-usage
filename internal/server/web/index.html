@@ -121,9 +121,20 @@
         font-weight: 600;
       }
 
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+      }
+
       button.secondary {
         background: #fff;
         color: var(--accent-strong);
+      }
+
+      button.small {
+        height: 28px;
+        padding: 0 8px;
+        font-size: 12px;
       }
 
       .summary {
@@ -264,7 +275,7 @@
       }
 
       .logs table {
-        min-width: 1240px;
+        min-width: 1320px;
       }
 
       .log-controls {
@@ -290,6 +301,93 @@
         color: var(--muted);
       }
 
+      .modal {
+        position: fixed;
+        inset: 0;
+        z-index: 20;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        background: rgb(15 23 42 / 0.36);
+      }
+
+      .modal.hidden {
+        display: none;
+      }
+
+      .modal-panel {
+        width: min(1100px, calc(100vw - 32px));
+        max-height: min(860px, calc(100vh - 48px));
+        background: var(--panel);
+        border: 1px solid var(--line);
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
+      }
+
+      .modal-body {
+        overflow: auto;
+        padding: 14px;
+        display: grid;
+        gap: 14px;
+      }
+
+      .audit-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+        gap: 14px;
+      }
+
+      .audit-block {
+        border: 1px solid var(--line);
+        background: #fff;
+        min-width: 0;
+      }
+
+      .audit-block h3 {
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .conversation {
+        display: grid;
+        gap: 10px;
+        padding: 12px;
+      }
+
+      .message {
+        display: grid;
+        gap: 5px;
+      }
+
+      .message-role {
+        color: var(--muted);
+        font-size: 12px;
+        text-transform: uppercase;
+      }
+
+      .message-content,
+      pre {
+        margin: 0;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        font-family:
+          ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          Consolas,
+          monospace;
+        font-size: 12px;
+        line-height: 1.55;
+      }
+
+      pre {
+        padding: 12px;
+        max-height: 580px;
+        overflow: auto;
+        background: #0f172a;
+        color: #e5e7eb;
+      }
+
       @media (max-width: 1100px) {
         .filters {
           grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -304,6 +402,10 @@
         }
 
         .grid {
+          grid-template-columns: 1fr;
+        }
+
+        .audit-grid {
           grid-template-columns: 1fr;
         }
       }
@@ -455,6 +557,7 @@
                 <th>渠道</th>
                 <th>IP</th>
                 <th>Request ID</th>
+                <th>对话</th>
               </tr>
             </thead>
             <tbody id="logsBody"></tbody>
@@ -462,6 +565,31 @@
         </div>
       </section>
     </main>
+
+    <div id="auditModal" class="modal hidden" role="dialog" aria-modal="true">
+      <div class="modal-panel">
+        <div class="section-head">
+          <div>
+            <h2>请求体</h2>
+            <div id="auditMeta" class="section-subtitle">-</div>
+          </div>
+          <button id="auditClose" class="secondary" type="button">关闭</button>
+        </div>
+        <div class="modal-body">
+          <div id="auditNotice" class="pill">loading</div>
+          <div class="audit-grid">
+            <div class="audit-block">
+              <h3>Messages</h3>
+              <div id="auditMessages" class="conversation"></div>
+            </div>
+            <div class="audit-block">
+              <h3>Raw JSON</h3>
+              <pre id="auditRaw"></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <script>
       const state = {
@@ -590,7 +718,7 @@
         el("prevPage").disabled = data.page <= 1;
         el("nextPage").disabled = data.page >= totalPages;
         if (!data.items?.length) {
-          el("logsBody").innerHTML = `<tr><td colspan="13" class="empty">没有数据</td></tr>`;
+          el("logsBody").innerHTML = `<tr><td colspan="14" class="empty">没有数据</td></tr>`;
           return;
         }
         el("logsBody").innerHTML = data.items
@@ -611,10 +739,76 @@
                 <td>${escapeHtml(item.channel_name || String(item.channel_id || ""))}</td>
                 <td>${escapeHtml(item.ip || "")}</td>
                 <td class="muted">${escapeHtml(item.request_id || "")}</td>
+                <td><button class="secondary small audit-open" type="button" data-log-id="${item.id}">查看</button></td>
               </tr>
             `;
           })
           .join("");
+        document.querySelectorAll("button[data-log-id]").forEach((button) => {
+          button.addEventListener("click", () => {
+            openAuditDialog(button.dataset.logId).catch(notifyError);
+          });
+        });
+      }
+
+      async function openAuditDialog(logId) {
+        el("auditModal").classList.remove("hidden");
+        el("auditMeta").textContent = `Log #${logId}`;
+        el("auditNotice").textContent = "loading";
+        el("auditNotice").className = "pill";
+        el("auditMessages").innerHTML = "";
+        el("auditRaw").textContent = "";
+
+        const data = await api(`/api/logs/${logId}/audit`);
+        renderAuditDetail(data);
+      }
+
+      function renderAuditDetail(data) {
+        const log = data.log || {};
+        el("auditMeta").textContent = `${tsToText(log.created_at)} · ${log.key_name || log.token_name || ""} · ${log.model_name || ""}`;
+        if (!data.enabled) {
+          el("auditNotice").textContent = "audit disabled";
+          el("auditNotice").className = "pill error";
+          el("auditMessages").innerHTML = `<div class="empty">未配置 AUDIT_LOG_GLOB</div>`;
+          return;
+        }
+        const item = data.items?.[0];
+        if (!item) {
+          el("auditNotice").textContent = "not found";
+          el("auditNotice").className = "pill error";
+          el("auditMessages").innerHTML = `<div class="empty">没有匹配到请求体</div>`;
+          return;
+        }
+        el("auditNotice").textContent = `${item.matched_by || "matched"} · ${item.source_path}:${item.source_line}`;
+        el("auditNotice").className = "pill success";
+        const messages = item.messages || [];
+        if (messages.length) {
+          el("auditMessages").innerHTML = messages
+            .map(
+              (message) => `
+                <div class="message">
+                  <div class="message-role">${escapeHtml(message.role || "message")}</div>
+                  <div class="message-content">${escapeHtml(message.content || "")}</div>
+                </div>
+              `,
+            )
+            .join("");
+        } else {
+          el("auditMessages").innerHTML = `<div class="empty">这个请求体没有解析出 messages</div>`;
+        }
+        el("auditRaw").textContent = prettyJSON(item.body || "");
+      }
+
+      function closeAuditDialog() {
+        el("auditModal").classList.add("hidden");
+      }
+
+      function prettyJSON(value) {
+        try {
+          return JSON.stringify(JSON.parse(value), null, 2);
+        } catch {
+          return value;
+        }
       }
 
       async function loadAll() {
@@ -725,9 +919,19 @@
           loadAll().catch(notifyError);
         }
       });
+      el("auditClose").addEventListener("click", closeAuditDialog);
+      el("auditModal").addEventListener("click", (event) => {
+        if (event.target === el("auditModal")) {
+          closeAuditDialog();
+        }
+      });
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          closeAuditDialog();
+        }
+      });
 
       loadAll().catch(notifyError);
     </script>
   </body>
 </html>
-

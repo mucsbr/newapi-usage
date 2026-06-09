@@ -364,6 +364,77 @@ func (s *Store) Logs(ctx context.Context, filter LogFilter) (LogPage, error) {
 	return LogPage{Items: items, Total: total, Page: filter.Page, PageSize: filter.PageSize}, rows.Err()
 }
 
+func (s *Store) LogByID(ctx context.Context, id int64) (UsageLog, error) {
+	ctx, cancel := s.context(ctx)
+	defer cancel()
+
+	query := fmt.Sprintf(`
+		SELECT
+			l.id,
+			COALESCE(l.created_at, 0),
+			COALESCE(l.type, 0),
+			COALESCE(l.request_id, ''),
+			COALESCE(l.user_id, 0),
+			COALESCE(l.username, ''),
+			COALESCE(l.token_id, 0),
+			COALESCE(l.token_name, ''),
+			COALESCE(NULLIF(t.name, ''), NULLIF(l.token_name, ''), ''),
+			COALESCE(%s, ''),
+			COALESCE(l.model_name, ''),
+			COALESCE(l.prompt_tokens, 0),
+			COALESCE(l.completion_tokens, 0),
+			COALESCE(l.prompt_tokens + l.completion_tokens, 0),
+			COALESCE(l.quota, 0),
+			COALESCE(l.use_time, 0),
+			COALESCE(l.is_stream, false),
+			COALESCE(l.channel_id, 0),
+			COALESCE(l.channel_name, ''),
+			COALESCE(l.ip, ''),
+			COALESCE(l.content, ''),
+			COALESCE(l.other, '')
+		FROM logs l
+		LEFT JOIN tokens t ON t.id = l.token_id
+		WHERE l.id = %s
+		LIMIT 1`, s.keyTailExpr("t"), s.placeholder(1))
+
+	var item UsageLog
+	err := s.db.QueryRowContext(ctx, query, id).Scan(
+		&item.ID,
+		&item.CreatedAt,
+		&item.Type,
+		&item.RequestID,
+		&item.UserID,
+		&item.Username,
+		&item.TokenID,
+		&item.TokenName,
+		&item.KeyName,
+		&item.KeyTail,
+		&item.ModelName,
+		&item.InputTokens,
+		&item.OutputTokens,
+		&item.TotalTokens,
+		&item.Quota,
+		&item.UseTime,
+		&item.IsStream,
+		&item.ChannelID,
+		&item.ChannelName,
+		&item.IP,
+		&item.Content,
+		&item.Other,
+	)
+	return item, err
+}
+
+func (s *Store) ResolveTokenByKey(key string) (TokenIdentity, error) {
+	ctx, cancel := s.context(context.Background())
+	defer cancel()
+
+	query := fmt.Sprintf(`SELECT id, COALESCE(name, ''), COALESCE(%s, '') FROM tokens WHERE %s = %s LIMIT 1`, s.keyTailExpr("tokens"), s.tokenKeyColumn("tokens"), s.placeholder(1))
+	var out TokenIdentity
+	err := s.db.QueryRowContext(ctx, query, key).Scan(&out.TokenID, &out.Name, &out.KeyTail)
+	return out, err
+}
+
 func (s *Store) context(ctx context.Context) (context.Context, context.CancelFunc) {
 	if ctx == nil {
 		ctx = context.Background()
