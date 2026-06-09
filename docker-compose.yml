@@ -1,0 +1,48 @@
+services:
+  newapi-usage:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: newapi-usage:local
+    container_name: newapi-usage
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8080}:8080"
+    environment:
+      # PostgreSQL example:
+      # SQL_DSN=postgresql://root:123456@postgres:5432/new-api?sslmode=disable
+      #
+      # MySQL example:
+      # SQL_DSN=root:123456@tcp(mysql:3306)/new-api?charset=utf8mb4&parseTime=true
+      #
+      # SQLite example:
+      # SQL_DSN=/data/one-api.db
+      - SQL_DSN=${SQL_DSN}
+      - DB_DRIVER=${DB_DRIVER:-}
+      - HOST=0.0.0.0
+      - PORT=8080
+      - DB_MAX_OPEN_CONNS=${DB_MAX_OPEN_CONNS:-10}
+      - DB_MAX_IDLE_CONNS=${DB_MAX_IDLE_CONNS:-5}
+      - QUERY_TIMEOUT_SECONDS=${QUERY_TIMEOUT_SECONDS:-30}
+      - SHOW_FULL_KEYS=${SHOW_FULL_KEYS:-false}
+      - TZ=${TZ:-Asia/Shanghai}
+    volumes:
+      # Mount the SQLite database here only if SQL_DSN points to /data/*.db.
+      - ./data:/data:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - default
+      - newapi-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  default:
+  newapi-network:
+    external: true
+    name: ${NEWAPI_NETWORK:-new-api_new-api-network}
