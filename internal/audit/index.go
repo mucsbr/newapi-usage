@@ -282,6 +282,69 @@ func (i *Indexer) rememberLookup(ctx context.Context, logID int64, items []Entry
 	}
 }
 
+func (i *Indexer) LookupClientInfo(ctx context.Context, filters []LookupFilter) (map[int64]Entry, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	out := make(map[int64]Entry)
+	cleaned := make([]LookupFilter, 0, len(filters))
+	logIDs := make([]int64, 0, len(filters))
+	seenLogID := make(map[int64]bool)
+	for _, filter := range filters {
+		if filter.LogID <= 0 || seenLogID[filter.LogID] {
+			continue
+		}
+		seenLogID[filter.LogID] = true
+		cleaned = append(cleaned, filter)
+		logIDs = append(logIDs, filter.LogID)
+	}
+	if len(cleaned) == 0 {
+		return out, nil
+	}
+
+	cached, err := i.lookupCachedClients(ctx, logIDs)
+	if err != nil {
+		return nil, err
+	}
+	for logID, entry := range cached {
+		out[logID] = entry
+	}
+
+	pending := make([]LookupFilter, 0, len(cleaned))
+	for _, filter := range cleaned {
+		if _, ok := out[filter.LogID]; ok {
+			continue
+		}
+		if filter.TokenID <= 0 || filter.CreatedAt <= 0 {
+			continue
+		}
+		pending = append(pending, filter)
+	}
+	if len(pending) == 0 {
+		return out, nil
+	}
+
+	candidates, err := i.lookupClientCandidates(ctx, pending)
+	if err != nil {
+		return nil, err
+	}
+	window := int64(i.cfg.LookupWindow.Seconds())
+	if window <= 0 {
+		window = 120
+	}
+	for _, filter := range pending {
+		entry, ok := bestClientCandidate(filter, candidates, window)
+		if !ok {
+			continue
+		}
+		entry.MatchedBy = "token_time"
+		entry.MatchedNote = fmt.Sprintf("same token within +/- %ds around estimated request start %d; model match is ranked first", window, lookupCenter(filter))
+		out[filter.LogID] = entry
+		i.rememberLookup(ctx, filter.LogID, []Entry{entry})
+	}
+	return out, nil
+}
+
 func (i *Indexer) Status(ctx context.Context) (Status, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -656,6 +719,167 @@ func (i *Indexer) rememberMatch(ctx context.Context, logID int64, entry Entry) e
 	return err
 }
 
+func (i *Indexer) lookupCachedClients(ctx context.Context, logIDs []int64) (map[int64]Entry, error) {
+	out := make(map[int64]Entry)
+	if len(logIDs) == 0 {
+		return out, nil
+	}
+	args := make([]any, 0, len(logIDs))
+	for _, logID := range logIDs {
+		args = append(args, logID)
+	}
+	query := fmt.Sprintf(`SELECT m.log_id, e.id, e.created_at, e.ingested_at, e.source_path, e.source_line,
+			e.byte_offset, e.method, e.path, e.model, e.token_id, e.key_tail, e.key_hash,
+			e.user_agent, e.client_name, e.client_version, e.client_variant, e.request_id,
+			e.has_timestamp, m.matched_by, m.matched_note
+		FROM log_audit_matches m
+		JOIN audit_entries e ON e.id = m.audit_entry_id
+		WHERE m.log_id IN (%s)`, placeholders(len(logIDs)))
+	rows, err := i.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var logID int64
+		var item Entry
+		if err := rows.Scan(
+			&logID,
+			&item.ID,
+			&item.CreatedAt,
+			&item.IngestedAt,
+			&item.SourcePath,
+			&item.SourceLine,
+			&item.ByteOffset,
+			&item.Method,
+			&item.Path,
+			&item.Model,
+			&item.TokenID,
+			&item.KeyTail,
+			&item.KeyHash,
+			&item.UserAgent,
+			&item.ClientName,
+			&item.ClientVersion,
+			&item.ClientVariant,
+			&item.RequestID,
+			&item.HasTimestamp,
+			&item.MatchedBy,
+			&item.MatchedNote,
+		); err != nil {
+			return nil, err
+		}
+		out[logID] = item
+	}
+	return out, rows.Err()
+}
+
+func (i *Indexer) lookupClientCandidates(ctx context.Context, filters []LookupFilter) ([]Entry, error) {
+	if len(filters) == 0 {
+		return nil, nil
+	}
+	window := int64(i.cfg.LookupWindow.Seconds())
+	if window <= 0 {
+		window = 120
+	}
+	minCreated := int64(0)
+	maxCreated := int64(0)
+	tokenIDs := make(map[int64]bool)
+	keyTails := make(map[string]bool)
+	for _, filter := range filters {
+		center := lookupCenter(filter)
+		if center <= 0 {
+			continue
+		}
+		start := center - window
+		end := center + window
+		if minCreated == 0 || start < minCreated {
+			minCreated = start
+		}
+		if end > maxCreated {
+			maxCreated = end
+		}
+		if filter.TokenID > 0 {
+			tokenIDs[filter.TokenID] = true
+		}
+		if strings.TrimSpace(filter.KeyTail) != "" {
+			keyTails[strings.TrimSpace(filter.KeyTail)] = true
+		}
+	}
+	if minCreated == 0 || maxCreated == 0 || (len(tokenIDs) == 0 && len(keyTails) == 0) {
+		return nil, nil
+	}
+
+	args := []any{minCreated, maxCreated}
+	identity := make([]string, 0, 2)
+	if len(tokenIDs) > 0 {
+		values := make([]int64, 0, len(tokenIDs))
+		for tokenID := range tokenIDs {
+			values = append(values, tokenID)
+		}
+		sort.Slice(values, func(a, b int) bool { return values[a] < values[b] })
+		placeholders := make([]string, 0, len(values))
+		for _, tokenID := range values {
+			args = append(args, tokenID)
+			placeholders = append(placeholders, "?")
+		}
+		identity = append(identity, "token_id IN ("+strings.Join(placeholders, ", ")+")")
+	}
+	if len(keyTails) > 0 {
+		values := make([]string, 0, len(keyTails))
+		for keyTail := range keyTails {
+			values = append(values, keyTail)
+		}
+		sort.Strings(values)
+		placeholders := make([]string, 0, len(values))
+		for _, keyTail := range values {
+			args = append(args, keyTail)
+			placeholders = append(placeholders, "?")
+		}
+		identity = append(identity, "(token_id = 0 AND key_tail IN ("+strings.Join(placeholders, ", ")+"))")
+	}
+
+	query := fmt.Sprintf(`SELECT id, created_at, ingested_at, source_path, source_line, byte_offset,
+			method, path, model, token_id, key_tail, key_hash, user_agent, client_name,
+			client_version, client_variant, request_id, has_timestamp
+		FROM audit_entries
+		WHERE has_timestamp = 1 AND created_at >= ? AND created_at <= ? AND (%s)
+		ORDER BY created_at DESC, id DESC`, strings.Join(identity, " OR "))
+	rows, err := i.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]Entry, 0)
+	for rows.Next() {
+		var item Entry
+		if err := rows.Scan(
+			&item.ID,
+			&item.CreatedAt,
+			&item.IngestedAt,
+			&item.SourcePath,
+			&item.SourceLine,
+			&item.ByteOffset,
+			&item.Method,
+			&item.Path,
+			&item.Model,
+			&item.TokenID,
+			&item.KeyTail,
+			&item.KeyHash,
+			&item.UserAgent,
+			&item.ClientName,
+			&item.ClientVersion,
+			&item.ClientVariant,
+			&item.RequestID,
+			&item.HasTimestamp,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (i *Indexer) lookupByTokenWindow(ctx context.Context, filter LookupFilter, window int64) ([]Entry, error) {
 	model := strings.TrimSpace(filter.Model)
 	center := lookupCenter(filter)
@@ -718,6 +942,70 @@ func tokenIdentityWhere(filter LookupFilter) (string, []any) {
 		return "token_id = ?", []any{filter.TokenID}
 	}
 	return "(token_id = ? OR (token_id = 0 AND key_tail = ?))", []any{filter.TokenID, keyTail}
+}
+
+func bestClientCandidate(filter LookupFilter, candidates []Entry, window int64) (Entry, bool) {
+	center := lookupCenter(filter)
+	if center <= 0 {
+		return Entry{}, false
+	}
+	model := strings.TrimSpace(filter.Model)
+	bestSet := false
+	var best Entry
+	bestModelRank := 0
+	bestStartDistance := int64(0)
+	bestEndDistance := int64(0)
+	for _, candidate := range candidates {
+		if !matchesTokenIdentity(filter, candidate) {
+			continue
+		}
+		if candidate.CreatedAt < center-window || candidate.CreatedAt > center+window {
+			continue
+		}
+		modelRank := 0
+		if model != "" && candidate.Model != model {
+			modelRank = 1
+		}
+		startDistance := absInt64(candidate.CreatedAt - center)
+		endDistance := absInt64(candidate.CreatedAt - filter.CreatedAt)
+		if !bestSet ||
+			modelRank < bestModelRank ||
+			(modelRank == bestModelRank && startDistance < bestStartDistance) ||
+			(modelRank == bestModelRank && startDistance == bestStartDistance && endDistance < bestEndDistance) ||
+			(modelRank == bestModelRank && startDistance == bestStartDistance && endDistance == bestEndDistance && candidate.ID > best.ID) {
+			bestSet = true
+			best = candidate
+			bestModelRank = modelRank
+			bestStartDistance = startDistance
+			bestEndDistance = endDistance
+		}
+	}
+	return best, bestSet
+}
+
+func matchesTokenIdentity(filter LookupFilter, candidate Entry) bool {
+	if filter.TokenID > 0 && candidate.TokenID == filter.TokenID {
+		return true
+	}
+	return candidate.TokenID == 0 && strings.TrimSpace(filter.KeyTail) != "" && candidate.KeyTail == strings.TrimSpace(filter.KeyTail)
+}
+
+func absInt64(value int64) int64 {
+	if value < 0 {
+		return -value
+	}
+	return value
+}
+
+func placeholders(count int) string {
+	if count <= 0 {
+		return ""
+	}
+	values := make([]string, count)
+	for idx := range values {
+		values[idx] = "?"
+	}
+	return strings.Join(values, ", ")
 }
 
 func entrySelectColumns(alias string) string {

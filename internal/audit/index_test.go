@@ -62,6 +62,16 @@ func TestIndexerIncrementalImport(t *testing.T) {
 		t.Fatalf("unexpected cached match: %+v", cached)
 	}
 
+	clients, err := idx.LookupClientInfo(context.Background(), []LookupFilter{
+		{LogID: 123, TokenID: 7, Model: "gpt-4o", CreatedAt: 1000},
+	})
+	if err != nil {
+		t.Fatalf("batch client lookup: %v", err)
+	}
+	if clients[123].ClientName != "codex" || clients[123].ClientVersion != "0.135.0" || clients[123].ClientVariant != "tui" {
+		t.Fatalf("unexpected batch client info: %+v", clients[123])
+	}
+
 	appendLine(t, logPath, `{"time":1001,"method":"POST","path":"/v1/messages","headers":{"x-api-key":"sk-prod"},"body":{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hi claude"}]}}`+"\n")
 	newLogPath := filepath.Join(dir, "request-body-2.jsonl")
 	if err := os.WriteFile(newLogPath, []byte(`{"time":1002,"method":"POST","path":"/v1/chat/completions","headers":{"authorization":"Bearer sk-prod"},"body":{"model":"gpt-4o","messages":[{"role":"user","content":"new file"}]}}`+"\n"), 0600); err != nil {

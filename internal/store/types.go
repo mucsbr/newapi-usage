@@ -76,28 +76,32 @@ type ModelUsage struct {
 }
 
 type UsageLog struct {
-	ID           int64  `json:"id"`
-	CreatedAt    int64  `json:"created_at"`
-	Type         int64  `json:"type"`
-	RequestID    string `json:"request_id"`
-	UserID       int64  `json:"user_id"`
-	Username     string `json:"username"`
-	TokenID      int64  `json:"token_id"`
-	TokenName    string `json:"token_name"`
-	KeyName      string `json:"key_name"`
-	KeyTail      string `json:"key_tail"`
-	ModelName    string `json:"model_name"`
-	InputTokens  int64  `json:"input_tokens"`
-	OutputTokens int64  `json:"output_tokens"`
-	TotalTokens  int64  `json:"total_tokens"`
-	Quota        int64  `json:"quota"`
-	UseTime      int64  `json:"use_time"`
-	IsStream     bool   `json:"is_stream"`
-	ChannelID    int64  `json:"channel_id"`
-	ChannelName  string `json:"channel_name"`
-	IP           string `json:"ip"`
-	Content      string `json:"content"`
-	Other        string `json:"other"`
+	ID            int64  `json:"id"`
+	CreatedAt     int64  `json:"created_at"`
+	Type          int64  `json:"type"`
+	RequestID     string `json:"request_id"`
+	UserID        int64  `json:"user_id"`
+	Username      string `json:"username"`
+	TokenID       int64  `json:"token_id"`
+	TokenName     string `json:"token_name"`
+	KeyName       string `json:"key_name"`
+	KeyTail       string `json:"key_tail"`
+	ModelName     string `json:"model_name"`
+	InputTokens   int64  `json:"input_tokens"`
+	OutputTokens  int64  `json:"output_tokens"`
+	TotalTokens   int64  `json:"total_tokens"`
+	Quota         int64  `json:"quota"`
+	UseTime       int64  `json:"use_time"`
+	IsStream      bool   `json:"is_stream"`
+	ChannelID     int64  `json:"channel_id"`
+	ChannelName   string `json:"channel_name"`
+	IP            string `json:"ip"`
+	ClientName    string `json:"client_name,omitempty"`
+	ClientVersion string `json:"client_version,omitempty"`
+	ClientVariant string `json:"client_variant,omitempty"`
+	UserAgent     string `json:"user_agent,omitempty"`
+	Content       string `json:"content"`
+	Other         string `json:"other"`
 }
 
 type LogPage struct {

@@ -142,7 +142,43 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.enrichLogsWithAudit(r.Context(), data.Items)
 	writeJSON(w, http.StatusOK, data)
+}
+
+func (s *Server) enrichLogsWithAudit(ctx context.Context, items []store.UsageLog) {
+	if s.audit == nil || !s.audit.Enabled() || len(items) == 0 {
+		return
+	}
+	if err := s.audit.ScanOnce(ctx); err != nil {
+		slog.Warn("audit scan before log enrichment failed", "error", err)
+	}
+	filters := make([]audit.LookupFilter, 0, len(items))
+	for _, item := range items {
+		filters = append(filters, audit.LookupFilter{
+			RequestID: item.RequestID,
+			TokenID:   item.TokenID,
+			KeyTail:   item.KeyTail,
+			Model:     item.ModelName,
+			CreatedAt: item.CreatedAt,
+			UseTime:   item.UseTime,
+			LogID:     item.ID,
+			Limit:     1,
+		})
+	}
+	clients, err := s.audit.LookupClientInfo(ctx, filters)
+	if err != nil {
+		slog.Warn("audit client batch lookup failed", "error", err)
+		return
+	}
+	for idx := range items {
+		if entry, ok := clients[items[idx].ID]; ok {
+			items[idx].ClientName = entry.ClientName
+			items[idx].ClientVersion = entry.ClientVersion
+			items[idx].ClientVariant = entry.ClientVariant
+			items[idx].UserAgent = entry.UserAgent
+		}
+	}
 }
 
 func (s *Server) handleLogSubroutes(w http.ResponseWriter, r *http.Request) {

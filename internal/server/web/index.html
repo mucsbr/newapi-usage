@@ -549,6 +549,7 @@
                 <th>状态</th>
                 <th>Key</th>
                 <th>模型</th>
+                <th>客户端</th>
                 <th class="num">输入</th>
                 <th class="num">输出</th>
                 <th class="num">总 Tokens</th>
@@ -731,7 +732,7 @@
         el("prevPage").disabled = data.page <= 1;
         el("nextPage").disabled = data.page >= totalPages;
         if (!data.items?.length) {
-          el("logsBody").innerHTML = `<tr><td colspan="14" class="empty">没有数据</td></tr>`;
+          el("logsBody").innerHTML = `<tr><td colspan="15" class="empty">没有数据</td></tr>`;
           return;
         }
         el("logsBody").innerHTML = data.items
@@ -744,6 +745,7 @@
                 <td>${status}</td>
                 <td>${escapeHtml(item.key_name || item.token_name || "")}</td>
                 <td>${escapeHtml(item.model_name || "")}</td>
+                <td>${escapeHtml(clientText(item))}</td>
                 <td class="num">${fmt.format(item.input_tokens || 0)}</td>
                 <td class="num">${fmt.format(item.output_tokens || 0)}</td>
                 <td class="num">${fmt.format(item.total_tokens || 0)}</td>
@@ -819,7 +821,7 @@
         const version = item.client_version || "";
         const variant = item.client_variant || "";
         const parts = [name, version, variant].filter(Boolean);
-        return parts.length ? parts.join(" ") : "unknown client";
+        return parts.length ? parts.join(" ") : "未知";
       }
 
       function closeAuditDialog() {
