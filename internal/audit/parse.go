@@ -20,17 +20,26 @@ func parseLine(line string, location *time.Location) (parsedRecord, error) {
 	path := firstString(obj, "path", "uri", "request_uri", "requestUri")
 	body := extractBody(obj)
 	bodyObj := parseJSONObject(body)
+	userAgent := firstString(obj, "user_agent", "userAgent", "ua")
+	if userAgent == "" {
+		userAgent = firstHeader(headers, "user-agent")
+	}
+	client := parseClientInfo(userAgent)
 
 	createdAt, hasTimestamp := extractTimestamp(obj, location)
 	record := parsedRecord{
-		CreatedAt:    createdAt,
-		HasTimestamp: hasTimestamp,
-		Method:       strings.ToUpper(firstString(obj, "method", "request_method", "requestMethod")),
-		Path:         path,
-		Model:        firstBodyString(bodyObj, "model"),
-		RequestID:    firstString(obj, "request_id", "requestId", "trace_id", "traceId"),
-		APIKey:       extractAPIKey(headers, path),
-		Body:         body,
+		CreatedAt:     createdAt,
+		HasTimestamp:  hasTimestamp,
+		Method:        strings.ToUpper(firstString(obj, "method", "request_method", "requestMethod")),
+		Path:          path,
+		Model:         firstBodyString(bodyObj, "model"),
+		RequestID:     firstString(obj, "request_id", "requestId", "trace_id", "traceId"),
+		APIKey:        extractAPIKey(headers, path),
+		UserAgent:     userAgent,
+		ClientName:    client.Name,
+		ClientVersion: client.Version,
+		ClientVariant: client.Variant,
+		Body:          body,
 	}
 	if record.RequestID == "" {
 		record.RequestID = firstHeader(headers, "x-oneapi-request-id", "x-request-id", "request-id")
@@ -113,6 +122,66 @@ func extractAPIKey(headers map[string]string, path string) string {
 		}
 	}
 	return ""
+}
+
+type clientInfo struct {
+	Name    string
+	Version string
+	Variant string
+}
+
+func parseClientInfo(userAgent string) clientInfo {
+	userAgent = strings.TrimSpace(userAgent)
+	lower := strings.ToLower(userAgent)
+	switch {
+	case strings.Contains(lower, "codex desktop/"):
+		return clientInfo{Name: "codex", Version: productVersion(userAgent, "Codex Desktop/"), Variant: "desktop"}
+	case strings.Contains(lower, "codex-tui/"):
+		return clientInfo{Name: "codex", Version: productVersion(userAgent, "codex-tui/"), Variant: "tui"}
+	case strings.Contains(lower, "claude-cli/"):
+		return clientInfo{Name: "claude", Version: productVersion(userAgent, "claude-cli/"), Variant: claudeVariant(lower)}
+	case strings.Contains(lower, "cherrystudio/"):
+		return clientInfo{Name: "cherrystudio", Version: productVersion(userAgent, "CherryStudio/"), Variant: "desktop"}
+	default:
+		return clientInfo{Name: "unknown"}
+	}
+}
+
+func productVersion(userAgent string, marker string) string {
+	idx := strings.Index(strings.ToLower(userAgent), strings.ToLower(marker))
+	if idx < 0 {
+		return ""
+	}
+	start := idx + len(marker)
+	end := start
+	for end < len(userAgent) {
+		ch := userAgent[end]
+		if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '.' || ch == '-' || ch == '_' {
+			end++
+			continue
+		}
+		break
+	}
+	return strings.TrimSpace(userAgent[start:end])
+}
+
+func claudeVariant(lowerUserAgent string) string {
+	switch {
+	case strings.Contains(lowerUserAgent, "claude-vscode"):
+		return "vscode"
+	case strings.Contains(lowerUserAgent, "claude-desktop"):
+		return "desktop"
+	case strings.Contains(lowerUserAgent, "sdk-cli"):
+		return "sdk-cli"
+	case strings.Contains(lowerUserAgent, "sdk-ts"):
+		return "sdk-ts"
+	case strings.Contains(lowerUserAgent, "agent-sdk/"):
+		return "cli-agent"
+	case strings.Contains(lowerUserAgent, "cli"):
+		return "cli"
+	default:
+		return ""
+	}
 }
 
 func usableKey(value string) bool {

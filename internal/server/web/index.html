@@ -793,7 +793,8 @@
           return;
         }
         const timestampNote = item.has_timestamp ? "" : " · no timestamp";
-        el("auditNotice").textContent = `${item.matched_by || "matched"}${timestampNote} · ${item.matched_note || ""} · ${item.source_path}:${item.source_line}`;
+        const client = clientText(item);
+        el("auditNotice").textContent = `${item.matched_by || "matched"}${timestampNote} · ${client} · ${item.matched_note || ""} · ${item.source_path}:${item.source_line}`;
         el("auditNotice").className = "pill success";
         const messages = item.messages || [];
         if (messages.length) {
@@ -811,6 +812,14 @@
           el("auditMessages").innerHTML = `<div class="empty">这个请求体没有解析出 messages</div>`;
         }
         el("auditRaw").textContent = prettyJSON(item.body || "");
+      }
+
+      function clientText(item) {
+        const name = item.client_name && item.client_name !== "unknown" ? item.client_name : "";
+        const version = item.client_version || "";
+        const variant = item.client_variant || "";
+        const parts = [name, version, variant].filter(Boolean);
+        return parts.length ? parts.join(" ") : "unknown client";
       }
 
       function closeAuditDialog() {

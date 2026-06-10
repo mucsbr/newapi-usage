@@ -175,17 +175,31 @@ func (s *Server) handleLogSubroutes(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, out)
 		return
 	}
-	items, err := s.audit.Lookup(r.Context(), audit.LookupFilter{
+	filter := audit.LookupFilter{
 		RequestID: logItem.RequestID,
 		TokenID:   logItem.TokenID,
+		KeyTail:   logItem.KeyTail,
 		Model:     logItem.ModelName,
 		CreatedAt: logItem.CreatedAt,
 		UseTime:   logItem.UseTime,
+		LogID:     logItem.ID,
 		Limit:     10,
-	})
+	}
+	items, err := s.audit.Lookup(r.Context(), filter)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	if len(items) == 0 {
+		if scanErr := s.audit.ScanOnce(r.Context()); scanErr != nil {
+			slog.Warn("audit scan before lookup retry failed", "log_id", logItem.ID, "error", scanErr)
+		} else {
+			items, err = s.audit.Lookup(r.Context(), filter)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+		}
 	}
 	out.Items = items
 	writeJSON(w, http.StatusOK, out)

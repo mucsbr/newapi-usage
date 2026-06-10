@@ -213,6 +213,15 @@ func (i *Indexer) Lookup(ctx context.Context, filter LookupFilter) ([]Entry, err
 	if filter.Limit <= 0 || filter.Limit > 50 {
 		filter.Limit = 10
 	}
+	if filter.LogID > 0 {
+		items, err := i.lookupCachedMatch(ctx, filter.LogID)
+		if err != nil {
+			return nil, err
+		}
+		if len(items) > 0 {
+			return items, nil
+		}
+	}
 	if filter.TokenID > 0 && filter.CreatedAt > 0 {
 		window := int64(i.cfg.LookupWindow.Seconds())
 		if window <= 0 {
@@ -228,6 +237,7 @@ func (i *Indexer) Lookup(ctx context.Context, filter LookupFilter) ([]Entry, err
 				items[idx].MatchedBy = "token_time"
 				items[idx].MatchedNote = fmt.Sprintf("same token within +/- %ds around estimated request start %d; model match is ranked first", window, center)
 			}
+			i.rememberLookup(ctx, filter.LogID, items)
 			return items, nil
 		}
 	}
@@ -241,6 +251,7 @@ func (i *Indexer) Lookup(ctx context.Context, filter LookupFilter) ([]Entry, err
 				items[idx].MatchedBy = "request_id"
 				items[idx].MatchedNote = "exact request_id match"
 			}
+			i.rememberLookup(ctx, filter.LogID, items)
 			return items, nil
 		}
 	}
@@ -256,6 +267,19 @@ func (i *Indexer) Lookup(ctx context.Context, filter LookupFilter) ([]Entry, err
 		items[idx].MatchedNote = "audit log has no usable timestamp match; newest same-token candidates are shown with model match ranked first"
 	}
 	return items, nil
+}
+
+func (i *Indexer) rememberLookup(ctx context.Context, logID int64, items []Entry) {
+	if logID <= 0 || len(items) == 0 {
+		return
+	}
+	first := items[0]
+	if first.MatchedBy != "token_time" && first.MatchedBy != "request_id" {
+		return
+	}
+	if err := i.rememberMatch(ctx, logID, first); err != nil {
+		slog.Warn("audit match cache failed", "log_id", logID, "audit_entry_id", first.ID, "error", err)
+	}
 }
 
 func (i *Indexer) Status(ctx context.Context) (Status, error) {
@@ -311,24 +335,75 @@ func (i *Indexer) initSchema(ctx context.Context) error {
 			token_id INTEGER NOT NULL DEFAULT 0,
 			key_tail TEXT NOT NULL DEFAULT '',
 			key_hash TEXT NOT NULL DEFAULT '',
+			user_agent TEXT NOT NULL DEFAULT '',
+			client_name TEXT NOT NULL DEFAULT '',
+			client_version TEXT NOT NULL DEFAULT '',
+			client_variant TEXT NOT NULL DEFAULT '',
 			request_id TEXT NOT NULL DEFAULT '',
 			has_timestamp INTEGER NOT NULL DEFAULT 0,
 			body TEXT NOT NULL,
 			UNIQUE(source_id, source_line)
 		)`,
+		`CREATE TABLE IF NOT EXISTS log_audit_matches (
+			log_id INTEGER PRIMARY KEY,
+			audit_entry_id INTEGER NOT NULL,
+			matched_by TEXT NOT NULL DEFAULT '',
+			matched_note TEXT NOT NULL DEFAULT '',
+			matched_at INTEGER NOT NULL DEFAULT 0
+		)`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_entries_token_time ON audit_entries(token_id, created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_entries_request_id ON audit_entries(request_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_entries_model ON audit_entries(model)`,
+		`CREATE INDEX IF NOT EXISTS idx_log_audit_matches_entry ON log_audit_matches(audit_entry_id)`,
 	}
 	for _, statement := range statements {
 		if _, err := i.db.ExecContext(ctx, statement); err != nil {
 			return err
 		}
 	}
-	if _, err := i.db.ExecContext(ctx, `ALTER TABLE audit_entries ADD COLUMN has_timestamp INTEGER NOT NULL DEFAULT 0`); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
-		return err
+	columns := []struct {
+		name       string
+		definition string
+	}{
+		{name: "has_timestamp", definition: "INTEGER NOT NULL DEFAULT 0"},
+		{name: "user_agent", definition: "TEXT NOT NULL DEFAULT ''"},
+		{name: "client_name", definition: "TEXT NOT NULL DEFAULT ''"},
+		{name: "client_version", definition: "TEXT NOT NULL DEFAULT ''"},
+		{name: "client_variant", definition: "TEXT NOT NULL DEFAULT ''"},
+	}
+	for _, column := range columns {
+		if err := i.addColumnIfMissing(ctx, "audit_entries", column.name, column.definition); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+func (i *Indexer) addColumnIfMissing(ctx context.Context, table string, column string, definition string) error {
+	rows, err := i.db.QueryContext(ctx, fmt.Sprintf(`PRAGMA table_info(%s)`, table))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name string
+		var columnType string
+		var notNull int
+		var defaultValue sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &pk); err != nil {
+			return err
+		}
+		if name == column {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = i.db.ExecContext(ctx, fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s %s`, table, column, definition))
+	return err
 }
 
 func (i *Indexer) ingestPath(ctx context.Context, path string, maxLines int) (fileScanResult, error) {
@@ -458,8 +533,9 @@ func (i *Indexer) insertEntry(ctx context.Context, tx *sql.Tx, sourceID string, 
 	}
 	result, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO audit_entries (
 		source_id, source_path, source_line, byte_offset, created_at, ingested_at,
-		method, path, model, token_id, key_tail, key_hash, request_id, has_timestamp, body
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		method, path, model, token_id, key_tail, key_hash, user_agent, client_name,
+		client_version, client_variant, request_id, has_timestamp, body
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		sourceID,
 		path,
 		lineNo,
@@ -472,6 +548,10 @@ func (i *Indexer) insertEntry(ctx context.Context, tx *sql.Tx, sourceID string, 
 		tokenID,
 		keyTail,
 		keyHash,
+		record.UserAgent,
+		record.ClientName,
+		record.ClientVersion,
+		record.ClientVariant,
 		record.RequestID,
 		record.HasTimestamp,
 		record.Body,
@@ -531,11 +611,12 @@ func (i *Indexer) touchState(ctx context.Context, state fileState, size int64) e
 }
 
 func (i *Indexer) lookupByRequestID(ctx context.Context, requestID string, limit int) ([]Entry, error) {
-	rows, err := i.db.QueryContext(ctx, `SELECT id, created_at, ingested_at, source_path, source_line, byte_offset, method, path, model, token_id, key_tail, key_hash, request_id, has_timestamp, body
+	query := fmt.Sprintf(`SELECT %s
 		FROM audit_entries
 		WHERE request_id = ?
 		ORDER BY id DESC
-		LIMIT ?`, requestID, limit)
+		LIMIT ?`, entrySelectColumns(""))
+	rows, err := i.db.QueryContext(ctx, query, requestID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -543,21 +624,54 @@ func (i *Indexer) lookupByRequestID(ctx context.Context, requestID string, limit
 	return scanEntries(rows)
 }
 
+func (i *Indexer) lookupCachedMatch(ctx context.Context, logID int64) ([]Entry, error) {
+	query := fmt.Sprintf(`SELECT %s, m.matched_by, m.matched_note
+		FROM log_audit_matches m
+		JOIN audit_entries e ON e.id = m.audit_entry_id
+		WHERE m.log_id = ?
+		LIMIT 1`, entrySelectColumns("e"))
+	rows, err := i.db.QueryContext(ctx, query, logID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items, err := scanEntries(rows)
+	if err != nil {
+		return nil, err
+	}
+	for idx := range items {
+		if items[idx].MatchedNote == "" {
+			items[idx].MatchedNote = "cached match"
+		} else {
+			items[idx].MatchedNote = "cached match; " + items[idx].MatchedNote
+		}
+	}
+	return items, nil
+}
+
+func (i *Indexer) rememberMatch(ctx context.Context, logID int64, entry Entry) error {
+	_, err := i.db.ExecContext(ctx, `INSERT OR IGNORE INTO log_audit_matches (
+		log_id, audit_entry_id, matched_by, matched_note, matched_at
+	) VALUES (?, ?, ?, ?, ?)`, logID, entry.ID, entry.MatchedBy, entry.MatchedNote, time.Now().Unix())
+	return err
+}
+
 func (i *Indexer) lookupByTokenWindow(ctx context.Context, filter LookupFilter, window int64) ([]Entry, error) {
 	model := strings.TrimSpace(filter.Model)
 	center := lookupCenter(filter)
-	args := []any{filter.TokenID, center - window, center + window}
+	identityWhere, args := tokenIdentityWhere(filter)
+	args = append(args, center-window, center+window)
 	modelOrder := "CASE WHEN 1=1 THEN 0 ELSE 0 END"
 	if model != "" {
 		args = append(args, model)
 		modelOrder = "CASE WHEN model = ? THEN 0 ELSE 1 END"
 	}
 	args = append(args, center, filter.CreatedAt, filter.Limit)
-	query := fmt.Sprintf(`SELECT id, created_at, ingested_at, source_path, source_line, byte_offset, method, path, model, token_id, key_tail, key_hash, request_id, has_timestamp, body
+	query := fmt.Sprintf(`SELECT %s
 		FROM audit_entries
-		WHERE token_id = ? AND has_timestamp = 1 AND created_at >= ? AND created_at <= ?
+		WHERE %s AND has_timestamp = 1 AND created_at >= ? AND created_at <= ?
 		ORDER BY %s ASC, ABS(created_at - ?) ASC, ABS(created_at - ?) ASC, id DESC
-		LIMIT ?`, modelOrder)
+		LIMIT ?`, entrySelectColumns(""), identityWhere, modelOrder)
 	rows, err := i.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -578,18 +692,18 @@ func lookupCenter(filter LookupFilter) int64 {
 
 func (i *Indexer) lookupLatestByToken(ctx context.Context, filter LookupFilter) ([]Entry, error) {
 	model := strings.TrimSpace(filter.Model)
-	args := []any{filter.TokenID}
+	identityWhere, args := tokenIdentityWhere(filter)
 	modelOrder := "CASE WHEN 1=1 THEN 0 ELSE 0 END"
 	if model != "" {
 		args = append(args, model)
 		modelOrder = "CASE WHEN model = ? THEN 0 ELSE 1 END"
 	}
 	args = append(args, filter.Limit)
-	query := fmt.Sprintf(`SELECT id, created_at, ingested_at, source_path, source_line, byte_offset, method, path, model, token_id, key_tail, key_hash, request_id, has_timestamp, body
+	query := fmt.Sprintf(`SELECT %s
 		FROM audit_entries
-		WHERE token_id = ?
+		WHERE %s
 		ORDER BY %s ASC, id DESC
-		LIMIT ?`, modelOrder)
+		LIMIT ?`, entrySelectColumns(""), identityWhere, modelOrder)
 	rows, err := i.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -598,11 +712,55 @@ func (i *Indexer) lookupLatestByToken(ctx context.Context, filter LookupFilter) 
 	return scanEntries(rows)
 }
 
+func tokenIdentityWhere(filter LookupFilter) (string, []any) {
+	keyTail := strings.TrimSpace(filter.KeyTail)
+	if keyTail == "" {
+		return "token_id = ?", []any{filter.TokenID}
+	}
+	return "(token_id = ? OR (token_id = 0 AND key_tail = ?))", []any{filter.TokenID, keyTail}
+}
+
+func entrySelectColumns(alias string) string {
+	columns := []string{
+		"id",
+		"created_at",
+		"ingested_at",
+		"source_path",
+		"source_line",
+		"byte_offset",
+		"method",
+		"path",
+		"model",
+		"token_id",
+		"key_tail",
+		"key_hash",
+		"user_agent",
+		"client_name",
+		"client_version",
+		"client_variant",
+		"request_id",
+		"has_timestamp",
+		"body",
+	}
+	if alias == "" {
+		return strings.Join(columns, ", ")
+	}
+	for idx, column := range columns {
+		columns[idx] = alias + "." + column
+	}
+	return strings.Join(columns, ", ")
+}
+
 func scanEntries(rows *sql.Rows) ([]Entry, error) {
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+	hasMatchColumns := len(columns) >= 21
 	items := make([]Entry, 0)
 	for rows.Next() {
 		var item Entry
-		if err := rows.Scan(
+		dest := []any{
 			&item.ID,
 			&item.CreatedAt,
 			&item.IngestedAt,
@@ -615,10 +773,18 @@ func scanEntries(rows *sql.Rows) ([]Entry, error) {
 			&item.TokenID,
 			&item.KeyTail,
 			&item.KeyHash,
+			&item.UserAgent,
+			&item.ClientName,
+			&item.ClientVersion,
+			&item.ClientVariant,
 			&item.RequestID,
 			&item.HasTimestamp,
 			&item.Body,
-		); err != nil {
+		}
+		if hasMatchColumns {
+			dest = append(dest, &item.MatchedBy, &item.MatchedNote)
+		}
+		if err := rows.Scan(dest...); err != nil {
 			return nil, err
 		}
 		item.Messages = NormalizeMessages(item.Body)
