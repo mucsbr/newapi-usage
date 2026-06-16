@@ -301,6 +301,37 @@
         color: var(--muted);
       }
 
+      .app-hidden {
+        display: none;
+      }
+
+      .login-view {
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+
+      .login-panel {
+        width: min(380px, calc(100vw - 32px));
+        background: var(--panel);
+        border: 1px solid var(--line);
+        padding: 20px;
+        display: grid;
+        gap: 14px;
+      }
+
+      .login-form {
+        display: grid;
+        gap: 12px;
+      }
+
+      .login-error {
+        min-height: 18px;
+        color: var(--bad);
+        font-size: 12px;
+      }
+
       .modal {
         position: fixed;
         inset: 0;
@@ -430,13 +461,34 @@
     </style>
   </head>
   <body>
+    <section id="loginView" class="login-view">
+      <div class="login-panel">
+        <div>
+          <h1>NewAPI Usage</h1>
+          <div class="section-subtitle">请输入管理密码</div>
+        </div>
+        <form id="loginForm" class="login-form">
+          <label>
+            管理密码
+            <input id="loginPassword" type="password" autocomplete="current-password" />
+          </label>
+          <button id="loginButton" type="submit">登录</button>
+          <div id="loginError" class="login-error"></div>
+        </form>
+      </div>
+    </section>
+
+    <div id="appView" class="app-hidden">
     <header>
       <div class="wrap topbar">
         <div>
           <h1>NewAPI Usage</h1>
           <div class="section-subtitle">按 key 查看模型、输入 tokens、输出 tokens 与请求日志</div>
         </div>
-        <div id="health" class="pill">checking</div>
+        <div class="log-controls">
+          <div id="health" class="pill">checking</div>
+          <button id="logout" class="secondary" type="button">退出</button>
+        </div>
       </div>
     </header>
 
@@ -566,6 +618,7 @@
         </div>
       </section>
     </main>
+    </div>
 
     <div id="auditModal" class="modal hidden" role="dialog" aria-modal="true">
       <div class="modal-panel">
@@ -638,12 +691,43 @@
 
       async function api(path, params = new URLSearchParams()) {
         const query = params.toString();
-        const response = await fetch(query ? `${path}?${query}` : path);
+        const response = await fetch(query ? `${path}?${query}` : path, { credentials: "same-origin" });
         if (!response.ok) {
+          if (response.status === 401) {
+            showLogin();
+          }
           const body = await response.json().catch(() => ({}));
           throw new Error(body?.error?.message || response.statusText);
         }
         return response.json();
+      }
+
+      async function postJSON(path, body = {}) {
+        const response = await fetch(path, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          throw new Error(data?.error?.message || response.statusText);
+        }
+        return response.json();
+      }
+
+      function showLogin(message = "") {
+        el("loginView").classList.remove("app-hidden");
+        el("appView").classList.add("app-hidden");
+        el("loginError").textContent = message;
+        el("loginPassword").focus();
+      }
+
+      function showApp() {
+        el("loginView").classList.add("app-hidden");
+        el("appView").classList.remove("app-hidden");
+        el("loginError").textContent = "";
+        el("loginPassword").value = "";
       }
 
       function renderSummary(data) {
@@ -890,6 +974,46 @@
         }
       }
 
+      async function checkAuth() {
+        const data = await api("/api/auth/status");
+        return Boolean(data.authenticated);
+      }
+
+      async function login(event) {
+        event.preventDefault();
+        const button = el("loginButton");
+        button.disabled = true;
+        el("loginError").textContent = "";
+        try {
+          await postJSON("/api/auth/login", { password: el("loginPassword").value });
+          showApp();
+          setDefaultTimeRange();
+          await loadAll();
+        } catch (error) {
+          el("loginError").textContent = "密码错误";
+        } finally {
+          button.disabled = false;
+        }
+      }
+
+      async function logout() {
+        await postJSON("/api/auth/logout");
+        state.selectedTokenId = 0;
+        state.selectedKeyName = "";
+        state.page = 1;
+        showLogin();
+      }
+
+      async function init() {
+        setDefaultTimeRange();
+        if (await checkAuth()) {
+          showApp();
+          await loadAll();
+          return;
+        }
+        showLogin();
+      }
+
       function escapeHtml(value) {
         return String(value ?? "")
           .replaceAll("&", "&amp;")
@@ -943,6 +1067,14 @@
           loadAll().catch(notifyError);
         }
       });
+      el("loginForm").addEventListener("submit", (event) => {
+        login(event).catch(() => {
+          el("loginError").textContent = "登录失败";
+        });
+      });
+      el("logout").addEventListener("click", () => {
+        logout().catch(notifyError);
+      });
       el("auditClose").addEventListener("click", closeAuditDialog);
       el("auditModal").addEventListener("click", (event) => {
         if (event.target === el("auditModal")) {
@@ -955,8 +1087,10 @@
         }
       });
 
-      setDefaultTimeRange();
-      loadAll().catch(notifyError);
+      init().catch((error) => {
+        console.error(error);
+        showLogin("初始化失败");
+      });
     </script>
   </body>
 </html>

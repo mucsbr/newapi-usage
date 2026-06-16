@@ -82,6 +82,12 @@ For SQLite, mount the database file under `./data` or adjust the `docker-compose
 
 ## Security
 
+`ADMIN_PASSWORD` is required. The dashboard and data APIs require login; `/api/health` remains unauthenticated for Docker health checks.
+
+```env
+ADMIN_PASSWORD=replace-with-a-long-random-password
+```
+
 `SHOW_FULL_KEYS=false` by default. In this mode the service only displays token ID, token name, and the last 8 characters of the key.
 
 Set `SHOW_FULL_KEYS=true` only on a trusted admin-only network.

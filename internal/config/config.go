@@ -25,6 +25,7 @@ type Config struct {
 	DBMaxIdleConns       int
 	QueryTimeout         time.Duration
 	ShowFullKeys         bool
+	AdminPassword        string
 	AuditLogGlob         string
 	AuditIndexDSN        string
 	AuditTimezone        string
@@ -42,6 +43,7 @@ func Load() (Config, error) {
 		DBMaxIdleConns:       getEnvInt("DB_MAX_IDLE_CONNS", 5),
 		QueryTimeout:         time.Duration(getEnvInt("QUERY_TIMEOUT_SECONDS", 30)) * time.Second,
 		ShowFullKeys:         getEnvBool("SHOW_FULL_KEYS", false),
+		AdminPassword:        getEnv("ADMIN_PASSWORD", ""),
 		AuditLogGlob:         firstEnv("AUDIT_LOG_GLOB", "AUDIT_LOG_PATHS"),
 		AuditIndexDSN:        getEnv("AUDIT_INDEX_DSN", "/var/lib/newapi-usage/audit.db"),
 		AuditTimezone:        getEnv("AUDIT_TIMEZONE", "UTC"),
@@ -51,6 +53,9 @@ func Load() (Config, error) {
 	}
 	if cfg.SQLDSN == "" {
 		return Config{}, fmt.Errorf("SQL_DSN is required")
+	}
+	if cfg.AdminPassword == "" {
+		return Config{}, fmt.Errorf("ADMIN_PASSWORD is required")
 	}
 
 	driver := strings.ToLower(strings.TrimSpace(firstEnv("DB_DRIVER", "DB_ENGINE")))

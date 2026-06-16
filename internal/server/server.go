@@ -20,19 +20,20 @@ import (
 var embeddedFiles embed.FS
 
 type Server struct {
-	store *store.Store
-	audit *audit.Indexer
-	mux   *http.ServeMux
+	store         *store.Store
+	audit         *audit.Indexer
+	adminPassword string
+	mux           *http.ServeMux
 }
 
-func New(st *store.Store, aud *audit.Indexer) *Server {
-	s := &Server{store: st, audit: aud, mux: http.NewServeMux()}
+func New(st *store.Store, aud *audit.Indexer, adminPassword string) *Server {
+	s := &Server{store: st, audit: aud, adminPassword: adminPassword, mux: http.NewServeMux()}
 	s.routes()
 	return s
 }
 
 func (s *Server) Handler() http.Handler {
-	return loggingMiddleware(s.mux)
+	return loggingMiddleware(s.authMiddleware(s.mux))
 }
 
 func (s *Server) routes() {
@@ -42,6 +43,9 @@ func (s *Server) routes() {
 	}
 	s.mux.Handle("/", http.FileServer(http.FS(staticFS)))
 	s.mux.HandleFunc("/api/health", s.handleHealth)
+	s.mux.HandleFunc("/api/auth/status", s.handleAuthStatus)
+	s.mux.HandleFunc("/api/auth/login", s.handleAuthLogin)
+	s.mux.HandleFunc("/api/auth/logout", s.handleAuthLogout)
 	s.mux.HandleFunc("/api/summary", s.handleSummary)
 	s.mux.HandleFunc("/api/keys", s.handleKeys)
 	s.mux.HandleFunc("/api/logs", s.handleLogs)

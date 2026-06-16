@@ -69,7 +69,7 @@ func main() {
 		}()
 	}
 
-	app := server.New(st, auditIndex)
+	app := server.New(st, auditIndex, cfg.AdminPassword)
 	httpServer := &http.Server{
 		Addr:              cfg.Addr(),
 		Handler:           app.Handler(),
