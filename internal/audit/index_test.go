@@ -50,6 +50,15 @@ func TestIndexerIncrementalImport(t *testing.T) {
 	if items[0].Messages[0].Content != "hello" {
 		t.Fatalf("unexpected messages: %+v", items[0].Messages)
 	}
+	var storedBody string
+	var compressedLen int
+	var bodyEncoding string
+	if err := idx.db.QueryRow(`SELECT body, length(body_gzip), body_encoding FROM audit_entries WHERE id = ?`, items[0].ID).Scan(&storedBody, &compressedLen, &bodyEncoding); err != nil {
+		t.Fatalf("read compressed body fields: %v", err)
+	}
+	if storedBody != "" || compressedLen <= 0 || bodyEncoding != bodyEncodingGzip {
+		t.Fatalf("body was not stored compressed: body_len=%d compressed_len=%d encoding=%q", len(storedBody), compressedLen, bodyEncoding)
+	}
 	if items[0].ClientName != "codex" || items[0].ClientVersion != "0.135.0" || items[0].ClientVariant != "tui" {
 		t.Fatalf("unexpected client info: %+v", items[0])
 	}

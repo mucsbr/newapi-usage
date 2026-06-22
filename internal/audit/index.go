@@ -405,6 +405,8 @@ func (i *Indexer) initSchema(ctx context.Context) error {
 			request_id TEXT NOT NULL DEFAULT '',
 			has_timestamp INTEGER NOT NULL DEFAULT 0,
 			body TEXT NOT NULL,
+			body_gzip BLOB,
+			body_encoding TEXT NOT NULL DEFAULT '',
 			UNIQUE(source_id, source_line)
 		)`,
 		`CREATE TABLE IF NOT EXISTS log_audit_matches (
@@ -433,6 +435,8 @@ func (i *Indexer) initSchema(ctx context.Context) error {
 		{name: "client_name", definition: "TEXT NOT NULL DEFAULT ''"},
 		{name: "client_version", definition: "TEXT NOT NULL DEFAULT ''"},
 		{name: "client_variant", definition: "TEXT NOT NULL DEFAULT ''"},
+		{name: "body_gzip", definition: "BLOB"},
+		{name: "body_encoding", definition: "TEXT NOT NULL DEFAULT ''"},
 	}
 	for _, column := range columns {
 		if err := i.addColumnIfMissing(ctx, "audit_entries", column.name, column.definition); err != nil {
@@ -594,11 +598,15 @@ func (i *Indexer) insertEntry(ctx context.Context, tx *sql.Tx, sourceID string, 
 			}
 		}
 	}
+	bodyGzip, bodyEncoding, err := encodeBody(record.Body)
+	if err != nil {
+		return false, err
+	}
 	result, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO audit_entries (
 		source_id, source_path, source_line, byte_offset, created_at, ingested_at,
 		method, path, model, token_id, key_tail, key_hash, user_agent, client_name,
-		client_version, client_variant, request_id, has_timestamp, body
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		client_version, client_variant, request_id, has_timestamp, body, body_gzip, body_encoding
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		sourceID,
 		path,
 		lineNo,
@@ -617,7 +625,9 @@ func (i *Indexer) insertEntry(ctx context.Context, tx *sql.Tx, sourceID string, 
 		record.ClientVariant,
 		record.RequestID,
 		record.HasTimestamp,
-		record.Body,
+		"",
+		bodyGzip,
+		bodyEncoding,
 	)
 	if err != nil {
 		return false, err
@@ -1009,7 +1019,18 @@ func placeholders(count int) string {
 }
 
 func entrySelectColumns(alias string) string {
-	columns := []string{
+	columns := entryColumnNames()
+	if alias == "" {
+		return strings.Join(columns, ", ")
+	}
+	for idx, column := range columns {
+		columns[idx] = alias + "." + column
+	}
+	return strings.Join(columns, ", ")
+}
+
+func entryColumnNames() []string {
+	return []string{
 		"id",
 		"created_at",
 		"ingested_at",
@@ -1029,14 +1050,9 @@ func entrySelectColumns(alias string) string {
 		"request_id",
 		"has_timestamp",
 		"body",
+		"body_gzip",
+		"body_encoding",
 	}
-	if alias == "" {
-		return strings.Join(columns, ", ")
-	}
-	for idx, column := range columns {
-		columns[idx] = alias + "." + column
-	}
-	return strings.Join(columns, ", ")
 }
 
 func scanEntries(rows *sql.Rows) ([]Entry, error) {
@@ -1044,10 +1060,13 @@ func scanEntries(rows *sql.Rows) ([]Entry, error) {
 	if err != nil {
 		return nil, err
 	}
-	hasMatchColumns := len(columns) >= 21
+	baseColumnCount := len(entryColumnNames())
+	hasMatchColumns := len(columns) >= baseColumnCount+2
 	items := make([]Entry, 0)
 	for rows.Next() {
 		var item Entry
+		var bodyGzip []byte
+		var bodyEncoding string
 		dest := []any{
 			&item.ID,
 			&item.CreatedAt,
@@ -1068,11 +1087,17 @@ func scanEntries(rows *sql.Rows) ([]Entry, error) {
 			&item.RequestID,
 			&item.HasTimestamp,
 			&item.Body,
+			&bodyGzip,
+			&bodyEncoding,
 		}
 		if hasMatchColumns {
 			dest = append(dest, &item.MatchedBy, &item.MatchedNote)
 		}
 		if err := rows.Scan(dest...); err != nil {
+			return nil, err
+		}
+		item.Body, err = decodeBody(item.Body, bodyGzip, bodyEncoding)
+		if err != nil {
 			return nil, err
 		}
 		item.Messages = NormalizeMessages(item.Body)
