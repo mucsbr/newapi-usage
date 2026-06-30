@@ -286,6 +286,16 @@
         font-weight: 500;
       }
 
+      .balance-block {
+        display: grid;
+        gap: 10px;
+      }
+
+      .balance-block + .balance-block {
+        border-top: 1px solid var(--line);
+        padding-top: 12px;
+      }
+
       .balance-hero {
         display: flex;
         align-items: baseline;
@@ -320,23 +330,6 @@
         font-weight: 600;
       }
 
-      .pool-grid {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 10px 12px;
-      }
-
-      .pool-stat span {
-        display: block;
-        color: var(--muted);
-        font-size: 11px;
-      }
-
-      .pool-stat strong {
-        font-size: 18px;
-        line-height: 1.2;
-      }
-
       .pool-foot {
         display: flex;
         align-items: center;
@@ -346,24 +339,20 @@
         font-size: 12px;
       }
 
-      .pool-detail {
-        display: none;
+      .pool-list {
+        display: grid;
         gap: 6px;
-        max-height: 220px;
+        max-height: 320px;
         overflow: auto;
         border-top: 1px solid var(--line);
         padding-top: 10px;
-      }
-
-      .pool-detail.open {
-        display: grid;
       }
 
       .pool-account {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 8px;
+        gap: 10px;
         font-size: 12px;
       }
 
@@ -371,6 +360,19 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+        min-width: 0;
+      }
+
+      .pool-windows {
+        display: flex;
+        gap: 6px;
+        flex-shrink: 0;
+      }
+
+      .pool-windows .pill {
+        height: 20px;
+        font-size: 11px;
+        padding: 0 7px;
       }
 
       .channel-error {
@@ -1014,12 +1016,6 @@
         section.classList.remove("app-hidden");
         el("channelsMeta").textContent = `${list.length} 渠道`;
         el("channelsGrid").innerHTML = list.map(channelCardHTML).join("");
-        document.querySelectorAll("[data-pool-toggle]").forEach((btn) => {
-          btn.addEventListener("click", () => {
-            const detail = document.querySelector(`[data-pool-detail="${btn.dataset.poolToggle}"]`);
-            if (detail) detail.classList.toggle("open");
-          });
-        });
         const refreshing = list.some((c) => !c.ok && c.error === "refreshing");
         if (refreshing && channelsRetry < 5) {
           channelsRetry += 1;
@@ -1051,23 +1047,29 @@
           return cardShell(c, `<span class="pill error">异常</span>`, `<div class="channel-error">${escapeHtml(c.error || "获取失败")}</div>`);
         }
         const statusPill = c.is_available === false ? `<span class="pill error">不可用</span>` : `<span class="pill success">可用</span>`;
-        const list = c.currencies || [];
+        const list = (c.currencies || []).slice().sort((a, b) => {
+          if (a.currency === b.currency) return 0;
+          if (a.currency === "CNY") return -1;
+          if (b.currency === "CNY") return 1;
+          return 0;
+        });
         if (!list.length) {
           return cardShell(c, statusPill, `<div class="muted">无余额数据</div>`);
         }
-        const primary = list[0];
-        const hero = `<div class="balance-hero"><strong>${escapeHtml(primary.total_balance)}</strong><span class="cur">${escapeHtml(primary.currency)} 总余额</span></div>`;
-        const rows = list
+        const blocks = list
           .map(
             (info) => `
-              <div class="balance-rows">
-                <div class="kv"><span>赠金 ${escapeHtml(info.currency)}</span><strong>${escapeHtml(info.granted_balance)}</strong></div>
-                <div class="kv"><span>充值 ${escapeHtml(info.currency)}</span><strong>${escapeHtml(info.topped_up_balance)}</strong></div>
+              <div class="balance-block">
+                <div class="balance-hero"><strong>${escapeHtml(info.total_balance)}</strong><span class="cur">${escapeHtml(info.currency)} 总余额</span></div>
+                <div class="balance-rows">
+                  <div class="kv"><span>赠金 ${escapeHtml(info.currency)}</span><strong>${escapeHtml(info.granted_balance)}</strong></div>
+                  <div class="kv"><span>充值 ${escapeHtml(info.currency)}</span><strong>${escapeHtml(info.topped_up_balance)}</strong></div>
+                </div>
               </div>
             `,
           )
           .join("");
-        return cardShell(c, statusPill, hero + rows);
+        return cardShell(c, statusPill, blocks);
       }
 
       function poolCardHTML(c) {
@@ -1078,42 +1080,32 @@
           return cardShell(c, pill, `<div class="channel-error">${escapeHtml(msg)}</div>`);
         }
         const p = c.pool || {};
-        const pill = `<span class="pill success">${fmt.format(p.total || 0)} 账号</span>`;
-        const stats = `
-          <div class="pool-grid">
-            <div class="pool-stat"><span>总数</span><strong>${fmt.format(p.total || 0)}</strong></div>
-            <div class="pool-stat"><span>健康</span><strong>${fmt.format(p.healthy || 0)}</strong></div>
-            <div class="pool-stat"><span>付费</span><strong>${fmt.format(p.paid || 0)}</strong></div>
-            <div class="pool-stat"><span>耗尽</span><strong>${fmt.format(p.exhausted || 0)}</strong></div>
-            <div class="pool-stat"><span>错误</span><strong>${fmt.format(p.errors || 0)}</strong></div>
-            <div class="pool-stat"><span>平均剩余</span><strong>${(p.avg_remaining_percent || 0).toFixed(1)}%</strong></div>
-          </div>
-        `;
         const accounts = p.accounts || [];
-        const detailBtn = accounts.length
-          ? `<button class="secondary small" type="button" data-pool-toggle="${escapeHtml(c.channel)}">明细 (${accounts.length})</button>`
-          : "";
-        const foot = `<div class="pool-foot"><span>更新于 ${tsToText(c.updated_at)}</span>${detailBtn}</div>`;
-        const detail = accounts.length
-          ? `<div class="pool-detail" data-pool-detail="${escapeHtml(c.channel)}">${accounts.map(poolAccountHTML).join("")}</div>`
-          : "";
-        return cardShell(c, pill, stats + foot + detail);
+        const pill = `<span class="pill success">${fmt.format(p.total || 0)} 账号</span>`;
+        const foot = `<div class="pool-foot"><span>更新于 ${tsToText(c.updated_at)}</span><span>5h / 周 · 剩余%</span></div>`;
+        const list = accounts.length
+          ? `<div class="pool-list">${accounts.map(poolAccountHTML).join("")}</div>`
+          : `<div class="muted">没有账号</div>`;
+        return cardShell(c, pill, foot + list);
+      }
+
+      function windowBadge(label, win) {
+        if (!win) {
+          return `<span class="pill" title="无该窗口数据">${label} —</span>`;
+        }
+        const r = win.remaining_percent;
+        const cls = r <= 10 ? "error" : r <= 30 ? "" : "success";
+        return `<span class="pill ${cls}" title="${label}窗口已用 ${win.used_percent.toFixed(1)}%">${label} ${r.toFixed(0)}%</span>`;
       }
 
       function poolAccountHTML(a) {
+        const label = a.email || a.name || "-";
         let right;
         if (a.error) {
-          right = `<span class="pill error">${escapeHtml(a.error)}</span>`;
-        } else if (a.paid) {
-          right = `<span class="pill">付费</span>`;
-        } else if (a.remaining_percent != null) {
-          const value = a.remaining_percent;
-          const cls = value <= 10 ? "error" : value <= 30 ? "" : "success";
-          right = `<span class="pill ${cls}">剩余 ${value.toFixed(1)}%</span>`;
+          right = `<span class="pool-windows"><span class="pill error">${escapeHtml(a.error)}</span></span>`;
         } else {
-          right = `<span class="pill">未知</span>`;
+          right = `<span class="pool-windows">${windowBadge("5h", a.primary_window)}${windowBadge("周", a.secondary_window)}</span>`;
         }
-        const label = a.email || a.name || "-";
         return `<div class="pool-account"><span class="email" title="${escapeHtml(label)}">${escapeHtml(label)}</span>${right}</div>`;
       }
 

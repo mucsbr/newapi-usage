@@ -43,16 +43,15 @@ type Config struct {
 	DeepSeekLabel   string
 
 	// CPA channel pool balance.
-	CPABaseURL              string
-	CPAToken                string
-	CPALabel                string
-	CPATargetType           string
-	CPAUserAgent            string
-	CPAUsedPercentThreshold int
-	CPAProbeConcurrency     int
-	CPAProbeTimeout         time.Duration
-	CPARefreshInterval      time.Duration
-	CPAMaxAccounts          int
+	CPABaseURL          string
+	CPAToken            string
+	CPALabel            string
+	CPATargetType       string
+	CPAUserAgent        string
+	CPAProbeConcurrency int
+	CPAProbeTimeout     time.Duration
+	CPARefreshInterval  time.Duration
+	CPAMaxAccounts      int
 }
 
 func Load() (Config, error) {
@@ -76,16 +75,15 @@ func Load() (Config, error) {
 		DeepSeekAPIBase: getEnv("DEEPSEEK_API_BASE", "https://api.deepseek.com"),
 		DeepSeekLabel:   getEnv("DEEPSEEK_LABEL", "DeepSeek"),
 
-		CPABaseURL:              getEnv("CPA_BASE_URL", ""),
-		CPAToken:                firstEnv("CPA_TOKEN", "CPA_MGMT_TOKEN"),
-		CPALabel:                getEnv("CPA_LABEL", "CPA"),
-		CPATargetType:           getEnv("CPA_TARGET_TYPE", "codex"),
-		CPAUserAgent:            getEnv("CPA_USER_AGENT", DefaultCPAUserAgent),
-		CPAUsedPercentThreshold: getEnvInt("CPA_USED_PERCENT_THRESHOLD", 95),
-		CPAProbeConcurrency:     getEnvInt("CPA_PROBE_CONCURRENCY", 20),
-		CPAProbeTimeout:         time.Duration(getEnvInt("CPA_PROBE_TIMEOUT_SECONDS", 15)) * time.Second,
-		CPARefreshInterval:      time.Duration(getEnvInt("CPA_REFRESH_INTERVAL_SECONDS", 300)) * time.Second,
-		CPAMaxAccounts:          getEnvInt("CPA_MAX_ACCOUNTS", 0),
+		CPABaseURL:          getEnv("CPA_BASE_URL", ""),
+		CPAToken:            firstEnv("CPA_TOKEN", "CPA_MGMT_TOKEN"),
+		CPALabel:            getEnv("CPA_LABEL", "CPA"),
+		CPATargetType:       getEnv("CPA_TARGET_TYPE", "codex"),
+		CPAUserAgent:        getEnv("CPA_USER_AGENT", DefaultCPAUserAgent),
+		CPAProbeConcurrency: getEnvInt("CPA_PROBE_CONCURRENCY", 20),
+		CPAProbeTimeout:     time.Duration(getEnvInt("CPA_PROBE_TIMEOUT_SECONDS", 15)) * time.Second,
+		CPARefreshInterval:  time.Duration(getEnvInt("CPA_REFRESH_INTERVAL_SECONDS", 300)) * time.Second,
+		CPAMaxAccounts:      getEnvInt("CPA_MAX_ACCOUNTS", 0),
 	}
 	if cfg.SQLDSN == "" {
 		return Config{}, fmt.Errorf("SQL_DSN is required")
@@ -138,9 +136,6 @@ func Load() (Config, error) {
 	}
 	if strings.TrimSpace(cfg.CPAUserAgent) == "" {
 		cfg.CPAUserAgent = DefaultCPAUserAgent
-	}
-	if cfg.CPAUsedPercentThreshold <= 0 {
-		cfg.CPAUsedPercentThreshold = 95
 	}
 	if cfg.CPAProbeConcurrency <= 0 {
 		cfg.CPAProbeConcurrency = 20

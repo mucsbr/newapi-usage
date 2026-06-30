@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -21,17 +22,16 @@ import (
 // Probing is expensive (one HTTP call per account), so it runs on a background
 // ticker and serves a cached snapshot — mirroring internal/audit's Indexer.
 type cpaProvider struct {
-	label         string
-	baseURL       string
-	token         string
-	targetType    string
-	userAgent     string
-	usedThreshold float64
-	concurrency   int
-	refreshEvery  time.Duration
-	maxAccounts   int
-	usageURL      string
-	client        *http.Client
+	label        string
+	baseURL      string
+	token        string
+	targetType   string
+	userAgent    string
+	concurrency  int
+	refreshEvery time.Duration
+	maxAccounts  int
+	usageURL     string
+	client       *http.Client
 
 	wg sync.WaitGroup
 
@@ -54,31 +54,29 @@ func newCPA(cfg cpaConfig) *cpaProvider {
 		refresh = 300 * time.Second
 	}
 	return &cpaProvider{
-		label:         cfg.Label,
-		baseURL:       strings.TrimRight(cfg.BaseURL, "/"),
-		token:         cfg.Token,
-		targetType:    cfg.TargetType,
-		userAgent:     cfg.UserAgent,
-		usedThreshold: float64(cfg.UsedPercentThreshold),
-		concurrency:   concurrency,
-		refreshEvery:  refresh,
-		maxAccounts:   cfg.MaxAccounts,
-		usageURL:      "https://chatgpt.com/backend-api/wham/usage",
-		client:        &http.Client{Timeout: probeTimeout},
+		label:        cfg.Label,
+		baseURL:      strings.TrimRight(cfg.BaseURL, "/"),
+		token:        cfg.Token,
+		targetType:   cfg.TargetType,
+		userAgent:    cfg.UserAgent,
+		concurrency:  concurrency,
+		refreshEvery: refresh,
+		maxAccounts:  cfg.MaxAccounts,
+		usageURL:     "https://chatgpt.com/backend-api/wham/usage",
+		client:       &http.Client{Timeout: probeTimeout},
 	}
 }
 
 type cpaConfig struct {
-	Label                string
-	BaseURL              string
-	Token                string
-	TargetType           string
-	UserAgent            string
-	UsedPercentThreshold int
-	Concurrency          int
-	ProbeTimeout         time.Duration
-	RefreshInterval      time.Duration
-	MaxAccounts          int
+	Label           string
+	BaseURL         string
+	Token           string
+	TargetType      string
+	UserAgent       string
+	Concurrency     int
+	ProbeTimeout    time.Duration
+	RefreshInterval time.Duration
+	MaxAccounts     int
 }
 
 func (c *cpaProvider) Start(ctx context.Context) {
@@ -125,6 +123,21 @@ func (c *cpaProvider) Snapshot() Balance {
 
 func (c *cpaProvider) refreshAndStore(ctx context.Context) {
 	balance := c.refresh(ctx)
+	if !balance.OK {
+		slog.Warn("cpa refresh failed", "label", c.label, "error", balance.Error)
+	} else if balance.Pool != nil {
+		errors := 0
+		for _, account := range balance.Pool.Accounts {
+			if account.Error != "" {
+				errors++
+			}
+		}
+		slog.Info("cpa refresh completed",
+			"label", c.label,
+			"total", balance.Pool.Total,
+			"errors", errors,
+		)
+	}
 	c.mu.Lock()
 	c.cached = balance
 	c.hasCached = true
@@ -163,31 +176,6 @@ func (c *cpaProvider) refresh(ctx context.Context) Balance {
 	wg.Wait()
 
 	summary := PoolSummary{Total: len(candidates), Accounts: accounts}
-	var remainingSum float64
-	var remainingCount int
-	for _, account := range accounts {
-		switch {
-		case account.Error != "":
-			summary.Errors++
-		case account.Paid:
-			summary.Paid++
-			summary.Probed++
-		case account.UsedPercent != nil:
-			summary.Probed++
-			remainingSum += *account.Remaining
-			remainingCount++
-			if *account.UsedPercent >= c.usedThreshold {
-				summary.Exhausted++
-			} else {
-				summary.Healthy++
-			}
-		default:
-			summary.Probed++
-		}
-	}
-	if remainingCount > 0 {
-		summary.AvgRemaining = remainingSum / float64(remainingCount)
-	}
 
 	return Balance{
 		Channel:   "cpa",
@@ -217,7 +205,7 @@ func (c *cpaProvider) fetchAuthFiles(ctx context.Context) ([]map[string]any, err
 		return nil, err
 	}
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("auth-files http %d", resp.StatusCode)
+		return nil, fmt.Errorf("auth-files http %d: %s", resp.StatusCode, snippet(body))
 	}
 	var parsed struct {
 		Files []map[string]any `json:"files"`
@@ -286,7 +274,7 @@ func (c *cpaProvider) probeOne(ctx context.Context, item map[string]any) PoolAcc
 		return account
 	}
 	if resp.StatusCode >= 400 {
-		account.Error = fmt.Sprintf("api-call http %d", resp.StatusCode)
+		account.Error = fmt.Sprintf("api-call http %d: %s", resp.StatusCode, snippet(body))
 		return account
 	}
 
@@ -306,10 +294,12 @@ func (c *cpaProvider) probeOne(ctx context.Context, item map[string]any) PoolAcc
 
 	var usage struct {
 		RateLimit struct {
-			PrimaryWindow struct {
+			PrimaryWindow *struct {
 				UsedPercent *float64 `json:"used_percent"`
 			} `json:"primary_window"`
-			SecondaryWindow json.RawMessage `json:"secondary_window"`
+			SecondaryWindow *struct {
+				UsedPercent *float64 `json:"used_percent"`
+			} `json:"secondary_window"`
 		} `json:"rate_limit"`
 	}
 	if err := json.Unmarshal([]byte(envelope.Body), &usage); err != nil {
@@ -317,15 +307,11 @@ func (c *cpaProvider) probeOne(ctx context.Context, item map[string]any) PoolAcc
 		return account
 	}
 
-	if len(usage.RateLimit.SecondaryWindow) > 0 && string(usage.RateLimit.SecondaryWindow) != "null" {
-		account.Paid = true
-		return account
+	if pw := usage.RateLimit.PrimaryWindow; pw != nil && pw.UsedPercent != nil {
+		account.Primary = &WindowUsage{UsedPercent: *pw.UsedPercent, Remaining: 100 - *pw.UsedPercent}
 	}
-	if used := usage.RateLimit.PrimaryWindow.UsedPercent; used != nil {
-		usedValue := *used
-		remaining := 100 - usedValue
-		account.UsedPercent = &usedValue
-		account.Remaining = &remaining
+	if sw := usage.RateLimit.SecondaryWindow; sw != nil && sw.UsedPercent != nil {
+		account.Secondary = &WindowUsage{UsedPercent: *sw.UsedPercent, Remaining: 100 - *sw.UsedPercent}
 	}
 	return account
 }
@@ -376,6 +362,17 @@ func extractEmail(item map[string]any) string {
 		return name
 	}
 	return ""
+}
+
+// snippet collapses whitespace and truncates a response body so it is safe to
+// embed in an error message / log line (e.g. the reason behind a 401).
+func snippet(body []byte) string {
+	text := strings.Join(strings.Fields(string(body)), " ")
+	const max = 300
+	if len(text) > max {
+		return text[:max] + "…"
+	}
+	return text
 }
 
 func fieldString(m map[string]any, key string) string {

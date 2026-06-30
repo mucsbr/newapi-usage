@@ -66,20 +66,22 @@ func TestDeepSeekBalanceHTTPErrorFallsBack(t *testing.T) {
 	}
 }
 
-func TestCPARefreshAggregatesRateLimit(t *testing.T) {
-	usage := func(usedPercent float64, secondary bool) string {
-		body := map[string]any{
-			"rate_limit": map[string]any{
-				"primary_window": map[string]any{"used_percent": usedPercent},
-			},
+func TestCPARefreshPerAccountWindows(t *testing.T) {
+	// usage builds an api-call envelope with optional primary (5h) and
+	// secondary (weekly) window used-percents.
+	usage := func(primary, secondary *float64) string {
+		rl := map[string]any{}
+		if primary != nil {
+			rl["primary_window"] = map[string]any{"used_percent": *primary}
 		}
-		if secondary {
-			body["rate_limit"].(map[string]any)["secondary_window"] = map[string]any{"used_percent": 1}
+		if secondary != nil {
+			rl["secondary_window"] = map[string]any{"used_percent": *secondary}
 		}
-		raw, _ := json.Marshal(body)
+		raw, _ := json.Marshal(map[string]any{"rate_limit": rl})
 		envelope, _ := json.Marshal(map[string]any{"status_code": 200, "body": string(raw)})
 		return string(envelope)
 	}
+	pct := func(v float64) *float64 { return &v }
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer cpa-token" {
@@ -91,7 +93,6 @@ func TestCPARefreshAggregatesRateLimit(t *testing.T) {
 			_, _ = io.WriteString(w, `{"files":[
 				{"type":"codex","name":"a@example.com.json","auth_index":1,"email":"a@example.com"},
 				{"type":"codex","name":"b","auth_index":2,"account":"b@example.com"},
-				{"type":"codex","name":"paid","auth_index":3},
 				{"type":"codex","name":"broken","auth_index":4},
 				{"type":"codex","name":"noidx"},
 				{"type":"sub2api","name":"ignored","auth_index":9}
@@ -104,11 +105,9 @@ func TestCPARefreshAggregatesRateLimit(t *testing.T) {
 			_ = json.Unmarshal(payload, &parsed)
 			switch int(parsed.AuthIndex) {
 			case 1:
-				_, _ = io.WriteString(w, usage(20, false))
+				_, _ = io.WriteString(w, usage(pct(20), pct(40))) // both windows
 			case 2:
-				_, _ = io.WriteString(w, usage(98, false))
-			case 3:
-				_, _ = io.WriteString(w, usage(5, true))
+				_, _ = io.WriteString(w, usage(pct(98), nil)) // 5h only
 			case 4:
 				envelope, _ := json.Marshal(map[string]any{"status_code": 401, "body": ""})
 				_, _ = w.Write(envelope)
@@ -122,15 +121,14 @@ func TestCPARefreshAggregatesRateLimit(t *testing.T) {
 	defer server.Close()
 
 	provider := newCPA(cpaConfig{
-		Label:                "CPA",
-		BaseURL:              server.URL,
-		Token:                "cpa-token",
-		TargetType:           "codex",
-		UserAgent:            "test-ua",
-		UsedPercentThreshold: 95,
-		Concurrency:          4,
-		ProbeTimeout:         5 * time.Second,
-		RefreshInterval:      time.Minute,
+		Label:           "CPA",
+		BaseURL:         server.URL,
+		Token:           "cpa-token",
+		TargetType:      "codex",
+		UserAgent:       "test-ua",
+		Concurrency:     4,
+		ProbeTimeout:    5 * time.Second,
+		RefreshInterval: time.Minute,
 	})
 
 	balance := provider.refresh(context.Background())
@@ -141,40 +139,47 @@ func TestCPARefreshAggregatesRateLimit(t *testing.T) {
 	if pool == nil {
 		t.Fatalf("expected pool summary")
 	}
-	if pool.Total != 5 {
-		t.Fatalf("total = %d, want 5 (codex candidates only)", pool.Total)
+	if pool.Total != 4 {
+		t.Fatalf("total = %d, want 4 (codex candidates only)", pool.Total)
 	}
-	if pool.Healthy != 1 {
-		t.Fatalf("healthy = %d, want 1", pool.Healthy)
+	if len(pool.Accounts) != 4 {
+		t.Fatalf("accounts = %d, want 4", len(pool.Accounts))
 	}
-	if pool.Exhausted != 1 {
-		t.Fatalf("exhausted = %d, want 1", pool.Exhausted)
+
+	byName := make(map[string]PoolAccount)
+	for _, a := range pool.Accounts {
+		byName[a.Name] = a
 	}
-	if pool.Paid != 1 {
-		t.Fatalf("paid = %d, want 1", pool.Paid)
+
+	// account 1: both windows present.
+	a1 := byName["a@example.com.json"]
+	if a1.Primary == nil || a1.Primary.Remaining != 80 {
+		t.Fatalf("a1 primary remaining = %+v, want 80", a1.Primary)
 	}
-	if pool.Errors != 2 {
-		t.Fatalf("errors = %d, want 2 (401 + missing auth_index)", pool.Errors)
+	if a1.Secondary == nil || a1.Secondary.Remaining != 60 {
+		t.Fatalf("a1 secondary remaining = %+v, want 60", a1.Secondary)
 	}
-	if pool.Probed != 3 {
-		t.Fatalf("probed = %d, want 3", pool.Probed)
+	if a1.Email != "a@example.com" {
+		t.Fatalf("a1 email = %q", a1.Email)
 	}
-	// remaining: account1 = 80, account2 = 2 -> avg 41.0
-	if pool.AvgRemaining < 40.9 || pool.AvgRemaining > 41.1 {
-		t.Fatalf("avg remaining = %.2f, want ~41.0", pool.AvgRemaining)
+
+	// account 2: 5h only, no weekly window.
+	a2 := byName["b"]
+	if a2.Primary == nil || a2.Primary.Remaining != 2 {
+		t.Fatalf("a2 primary remaining = %+v, want 2", a2.Primary)
 	}
-	if len(pool.Accounts) != 5 {
-		t.Fatalf("accounts = %d, want 5", len(pool.Accounts))
+	if a2.Secondary != nil {
+		t.Fatalf("a2 secondary = %+v, want nil", a2.Secondary)
 	}
-	// the missing-auth_index account should report the expected error
-	var missing *PoolAccount
-	for i := range pool.Accounts {
-		if pool.Accounts[i].Name == "noidx" {
-			missing = &pool.Accounts[i]
-		}
+
+	// account 4: 401 -> error, no windows.
+	if got := byName["broken"]; got.Error == "" || got.Primary != nil {
+		t.Fatalf("broken account = %+v, want error and no window", got)
 	}
-	if missing == nil || !strings.Contains(missing.Error, "auth_index") {
-		t.Fatalf("expected missing auth_index error, got %+v", missing)
+
+	// missing auth_index -> error.
+	if got := byName["noidx"]; !strings.Contains(got.Error, "auth_index") {
+		t.Fatalf("expected missing auth_index error, got %+v", got)
 	}
 }
 
@@ -185,10 +190,9 @@ func TestCPAFetchAuthFilesError(t *testing.T) {
 	defer server.Close()
 
 	provider := newCPA(cpaConfig{
-		BaseURL:              server.URL,
-		Token:                "cpa-token",
-		TargetType:           "codex",
-		UsedPercentThreshold: 95,
+		BaseURL:    server.URL,
+		Token:      "cpa-token",
+		TargetType: "codex",
 	})
 	balance := provider.refresh(context.Background())
 	if balance.OK {

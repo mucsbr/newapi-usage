@@ -36,24 +36,26 @@ type CurrencyBalance struct {
 	ToppedUpBalance string `json:"topped_up_balance"`
 }
 
-// PoolSummary is the aggregate view of a CPA account pool.
+// PoolSummary is the per-account view of a CPA account pool. No cross-account
+// aggregation is done — each auth file is shown on its own with both rate-limit
+// windows.
 type PoolSummary struct {
-	Total        int           `json:"total"`                 // candidate auth files of the target type
-	Probed       int           `json:"probed"`                // accounts that returned usable usage data
-	Healthy      int           `json:"healthy"`               // free accounts below the used-percent threshold
-	Exhausted    int           `json:"exhausted"`             // free accounts at/above the threshold
-	Paid         int           `json:"paid"`                  // accounts with a secondary window (non-free)
-	Errors       int           `json:"errors"`                // accounts that failed to probe
-	AvgRemaining float64       `json:"avg_remaining_percent"` // mean remaining% over free probed accounts
-	Accounts     []PoolAccount `json:"accounts,omitempty"`    // per-auth-file detail (expandable)
+	Total    int           `json:"total"`    // candidate auth files of the target type
+	Accounts []PoolAccount `json:"accounts"` // one row per auth file
 }
 
-// PoolAccount is the per-auth-file detail row inside a CPA pool card.
+// PoolAccount is one auth file's usage. ChatGPT's wham/usage exposes two
+// rate-limit windows: primary = 5-hour limit, secondary = weekly limit.
 type PoolAccount struct {
-	Name        string   `json:"name"`
-	Email       string   `json:"email,omitempty"`
-	UsedPercent *float64 `json:"used_percent,omitempty"`
-	Remaining   *float64 `json:"remaining_percent,omitempty"`
-	Paid        bool     `json:"paid"`
-	Error       string   `json:"error,omitempty"`
+	Name      string       `json:"name"`
+	Email     string       `json:"email,omitempty"`
+	Primary   *WindowUsage `json:"primary_window,omitempty"`   // 5-hour limit
+	Secondary *WindowUsage `json:"secondary_window,omitempty"` // weekly limit
+	Error     string       `json:"error,omitempty"`
+}
+
+// WindowUsage is one rate-limit window's usage. Remaining is 100 - UsedPercent.
+type WindowUsage struct {
+	UsedPercent float64 `json:"used_percent"`
+	Remaining   float64 `json:"remaining_percent"`
 }

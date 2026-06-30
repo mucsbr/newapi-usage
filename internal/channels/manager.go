@@ -22,16 +22,15 @@ func New(cfg config.Config) *Manager {
 	}
 	if cfg.CPAEnabled() {
 		m.cpa = newCPA(cpaConfig{
-			Label:                cfg.CPALabel,
-			BaseURL:              cfg.CPABaseURL,
-			Token:                cfg.CPAToken,
-			TargetType:           cfg.CPATargetType,
-			UserAgent:            cfg.CPAUserAgent,
-			UsedPercentThreshold: cfg.CPAUsedPercentThreshold,
-			Concurrency:          cfg.CPAProbeConcurrency,
-			ProbeTimeout:         cfg.CPAProbeTimeout,
-			RefreshInterval:      cfg.CPARefreshInterval,
-			MaxAccounts:          cfg.CPAMaxAccounts,
+			Label:           cfg.CPALabel,
+			BaseURL:         cfg.CPABaseURL,
+			Token:           cfg.CPAToken,
+			TargetType:      cfg.CPATargetType,
+			UserAgent:       cfg.CPAUserAgent,
+			Concurrency:     cfg.CPAProbeConcurrency,
+			ProbeTimeout:    cfg.CPAProbeTimeout,
+			RefreshInterval: cfg.CPARefreshInterval,
+			MaxAccounts:     cfg.CPAMaxAccounts,
 		})
 	}
 	return m
