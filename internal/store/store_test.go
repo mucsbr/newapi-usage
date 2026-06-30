@@ -102,6 +102,19 @@ func TestStoreQueries(t *testing.T) {
 		t.Fatalf("unexpected first log: %+v", logs.Items[0])
 	}
 
+	keyNameLogs, err := s.Logs(context.Background(), LogFilter{KeyName: "prod", Page: 1, PageSize: 10})
+	if err != nil {
+		t.Fatalf("logs by key name: %v", err)
+	}
+	if keyNameLogs.Total != 2 || len(keyNameLogs.Items) != 2 {
+		t.Fatalf("unexpected key-name logs: total=%d items=%d", keyNameLogs.Total, len(keyNameLogs.Items))
+	}
+	for _, item := range keyNameLogs.Items {
+		if item.TokenID != 1 {
+			t.Fatalf("key-name filter leaked token %d", item.TokenID)
+		}
+	}
+
 	token, err := s.ResolveTokenByKey("sk-abcdef1234567890")
 	if err != nil {
 		t.Fatalf("resolve prefixed token key: %v", err)

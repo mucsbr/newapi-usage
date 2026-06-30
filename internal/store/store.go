@@ -62,8 +62,8 @@ func (s *Store) Summary(ctx context.Context, tr TimeRange) (Summary, error) {
 	query := fmt.Sprintf(`
 		SELECT
 			COUNT(*) AS request_count,
-			SUM(CASE WHEN l.type = 2 THEN 1 ELSE 0 END) AS success_count,
-			SUM(CASE WHEN l.type = 5 THEN 1 ELSE 0 END) AS error_count,
+			COALESCE(SUM(CASE WHEN l.type = 2 THEN 1 ELSE 0 END), 0) AS success_count,
+			COALESCE(SUM(CASE WHEN l.type = 5 THEN 1 ELSE 0 END), 0) AS error_count,
 			COUNT(DISTINCT l.token_id) AS token_count,
 			COUNT(DISTINCT l.user_id) AS user_count,
 			COUNT(DISTINCT NULLIF(l.model_name, '')) AS model_count,
@@ -128,8 +128,8 @@ func (s *Store) KeyUsage(ctx context.Context, filter KeyFilter) ([]KeyUsage, err
 			COALESCE(MAX(l.user_id), 0) AS user_id,
 			COALESCE(MAX(l.username), '') AS username,
 			COUNT(*) AS request_count,
-			SUM(CASE WHEN l.type = 2 THEN 1 ELSE 0 END) AS success_count,
-			SUM(CASE WHEN l.type = 5 THEN 1 ELSE 0 END) AS error_count,
+			COALESCE(SUM(CASE WHEN l.type = 2 THEN 1 ELSE 0 END), 0) AS success_count,
+			COALESCE(SUM(CASE WHEN l.type = 5 THEN 1 ELSE 0 END), 0) AS error_count,
 			COUNT(DISTINCT NULLIF(l.model_name, '')) AS model_count,
 			COALESCE(SUM(l.prompt_tokens), 0) AS input_tokens,
 			COALESCE(SUM(l.completion_tokens), 0) AS output_tokens,
@@ -266,6 +266,14 @@ func (s *Store) Logs(ctx context.Context, filter LogFilter) (LogPage, error) {
 		args = append(args, strings.TrimSpace(filter.Model))
 		conditions = append(conditions, "l.model_name = "+s.placeholder(len(args)))
 	}
+	if strings.TrimSpace(filter.KeyName) != "" {
+		pattern := "%" + strings.ToLower(strings.TrimSpace(filter.KeyName)) + "%"
+		args = append(args, pattern, pattern)
+		conditions = append(conditions, fmt.Sprintf(`(
+			LOWER(COALESCE(t.name, '')) LIKE %s OR
+			LOWER(COALESCE(l.token_name, '')) LIKE %s
+		)`, s.placeholder(len(args)-1), s.placeholder(len(args))))
+	}
 	switch strings.ToLower(strings.TrimSpace(filter.LogType)) {
 	case "success":
 		conditions = append(conditions, "l.type = 2")
@@ -284,7 +292,7 @@ func (s *Store) Logs(ctx context.Context, filter LogFilter) (LogPage, error) {
 	}
 	where := "WHERE " + strings.Join(conditions, " AND ")
 
-	countQuery := "SELECT COUNT(*) FROM logs l " + where
+	countQuery := "SELECT COUNT(*) FROM logs l LEFT JOIN tokens t ON t.id = l.token_id " + where
 	var total int64
 	if err := s.db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
 		return LogPage{}, err

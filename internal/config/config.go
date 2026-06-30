@@ -16,6 +16,10 @@ const (
 	DriverSQLite   Driver = "sqlite"
 )
 
+// DefaultCPAUserAgent mirrors pool_maintainer.py's DEFAULT_MGMT_UA so the CPA
+// management api-call probe presents the same client identity.
+const DefaultCPAUserAgent = "codex-tui/0.118.0 (Mac OS 26.3.1; arm64) iTerm.app/3.6.9 (codex-tui; 0.118.0)"
+
 type Config struct {
 	Host                 string
 	Port                 int
@@ -32,6 +36,23 @@ type Config struct {
 	AuditScanInterval    time.Duration
 	AuditLookupWindow    time.Duration
 	AuditMaxLinesPerScan int
+
+	// DeepSeek channel balance.
+	DeepSeekAPIKey  string
+	DeepSeekAPIBase string
+	DeepSeekLabel   string
+
+	// CPA channel pool balance.
+	CPABaseURL              string
+	CPAToken                string
+	CPALabel                string
+	CPATargetType           string
+	CPAUserAgent            string
+	CPAUsedPercentThreshold int
+	CPAProbeConcurrency     int
+	CPAProbeTimeout         time.Duration
+	CPARefreshInterval      time.Duration
+	CPAMaxAccounts          int
 }
 
 func Load() (Config, error) {
@@ -50,6 +71,21 @@ func Load() (Config, error) {
 		AuditScanInterval:    time.Duration(getEnvInt("AUDIT_SCAN_INTERVAL_SECONDS", 10)) * time.Second,
 		AuditLookupWindow:    time.Duration(getEnvInt("AUDIT_LOOKUP_WINDOW_SECONDS", 120)) * time.Second,
 		AuditMaxLinesPerScan: getEnvInt("AUDIT_MAX_LINES_PER_SCAN", 50000),
+
+		DeepSeekAPIKey:  firstEnv("DEEPSEEK_API_KEY", "DEEPSEEK_TOKEN"),
+		DeepSeekAPIBase: getEnv("DEEPSEEK_API_BASE", "https://api.deepseek.com"),
+		DeepSeekLabel:   getEnv("DEEPSEEK_LABEL", "DeepSeek"),
+
+		CPABaseURL:              getEnv("CPA_BASE_URL", ""),
+		CPAToken:                firstEnv("CPA_TOKEN", "CPA_MGMT_TOKEN"),
+		CPALabel:                getEnv("CPA_LABEL", "CPA"),
+		CPATargetType:           getEnv("CPA_TARGET_TYPE", "codex"),
+		CPAUserAgent:            getEnv("CPA_USER_AGENT", DefaultCPAUserAgent),
+		CPAUsedPercentThreshold: getEnvInt("CPA_USED_PERCENT_THRESHOLD", 95),
+		CPAProbeConcurrency:     getEnvInt("CPA_PROBE_CONCURRENCY", 20),
+		CPAProbeTimeout:         time.Duration(getEnvInt("CPA_PROBE_TIMEOUT_SECONDS", 15)) * time.Second,
+		CPARefreshInterval:      time.Duration(getEnvInt("CPA_REFRESH_INTERVAL_SECONDS", 300)) * time.Second,
+		CPAMaxAccounts:          getEnvInt("CPA_MAX_ACCOUNTS", 0),
 	}
 	if cfg.SQLDSN == "" {
 		return Config{}, fmt.Errorf("SQL_DSN is required")
@@ -92,7 +128,49 @@ func Load() (Config, error) {
 		cfg.AuditMaxLinesPerScan = 50000
 	}
 
+	cfg.DeepSeekAPIBase = strings.TrimRight(strings.TrimSpace(cfg.DeepSeekAPIBase), "/")
+	if cfg.DeepSeekAPIBase == "" {
+		cfg.DeepSeekAPIBase = "https://api.deepseek.com"
+	}
+	cfg.CPABaseURL = strings.TrimRight(strings.TrimSpace(cfg.CPABaseURL), "/")
+	if strings.TrimSpace(cfg.CPATargetType) == "" {
+		cfg.CPATargetType = "codex"
+	}
+	if strings.TrimSpace(cfg.CPAUserAgent) == "" {
+		cfg.CPAUserAgent = DefaultCPAUserAgent
+	}
+	if cfg.CPAUsedPercentThreshold <= 0 {
+		cfg.CPAUsedPercentThreshold = 95
+	}
+	if cfg.CPAProbeConcurrency <= 0 {
+		cfg.CPAProbeConcurrency = 20
+	}
+	if cfg.CPAProbeTimeout <= 0 {
+		cfg.CPAProbeTimeout = 15 * time.Second
+	}
+	if cfg.CPARefreshInterval <= 0 {
+		cfg.CPARefreshInterval = 300 * time.Second
+	}
+	if cfg.CPAMaxAccounts < 0 {
+		cfg.CPAMaxAccounts = 0
+	}
+
 	return cfg, nil
+}
+
+// DeepSeekEnabled reports whether a DeepSeek balance card should be served.
+func (c Config) DeepSeekEnabled() bool {
+	return strings.TrimSpace(c.DeepSeekAPIKey) != ""
+}
+
+// CPAEnabled reports whether a CPA pool balance card should be served.
+func (c Config) CPAEnabled() bool {
+	return strings.TrimSpace(c.CPABaseURL) != "" && strings.TrimSpace(c.CPAToken) != ""
+}
+
+// ChannelsEnabled reports whether the channel balance feature is active at all.
+func (c Config) ChannelsEnabled() bool {
+	return c.DeepSeekEnabled() || c.CPAEnabled()
 }
 
 func (c Config) Addr() string {

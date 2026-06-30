@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/mucsbr/newapi-usage/internal/audit"
+	"github.com/mucsbr/newapi-usage/internal/channels"
 	"github.com/mucsbr/newapi-usage/internal/store"
 )
 
@@ -22,12 +23,13 @@ var embeddedFiles embed.FS
 type Server struct {
 	store         *store.Store
 	audit         *audit.Indexer
+	channels      *channels.Manager
 	adminPassword string
 	mux           *http.ServeMux
 }
 
-func New(st *store.Store, aud *audit.Indexer, adminPassword string) *Server {
-	s := &Server{store: st, audit: aud, adminPassword: adminPassword, mux: http.NewServeMux()}
+func New(st *store.Store, aud *audit.Indexer, ch *channels.Manager, adminPassword string) *Server {
+	s := &Server{store: st, audit: aud, channels: ch, adminPassword: adminPassword, mux: http.NewServeMux()}
 	s.routes()
 	return s
 }
@@ -51,6 +53,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/logs", s.handleLogs)
 	s.mux.HandleFunc("/api/logs/", s.handleLogSubroutes)
 	s.mux.HandleFunc("/api/audit/status", s.handleAuditStatus)
+	s.mux.HandleFunc("/api/channels/balance", s.handleChannelsBalance)
 	s.mux.HandleFunc("/api/keys/", s.handleKeySubroutes)
 }
 
@@ -138,6 +141,7 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 		TokenID:   int64(queryInt(r, "token_id", 0)),
 		Model:     q.Get("model"),
 		Query:     q.Get("q"),
+		KeyName:   q.Get("key_name"),
 		LogType:   q.Get("type"),
 		Page:      clampInt(queryInt(r, "page", 1), 1, 1000000),
 		PageSize:  clampInt(queryInt(r, "page_size", 100), 1, 500),
@@ -260,6 +264,21 @@ func (s *Server) handleAuditStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, status)
+}
+
+func (s *Server) handleChannelsBalance(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	items := []channels.Balance{}
+	if s.channels != nil && s.channels.Enabled() {
+		items = s.channels.Snapshot(r.Context())
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"enabled":  s.channels != nil && s.channels.Enabled(),
+		"channels": items,
+	})
 }
 
 func parseTimeRange(r *http.Request) store.TimeRange {

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/mucsbr/newapi-usage/internal/audit"
+	"github.com/mucsbr/newapi-usage/internal/channels"
 	"github.com/mucsbr/newapi-usage/internal/config"
 	"github.com/mucsbr/newapi-usage/internal/server"
 	"github.com/mucsbr/newapi-usage/internal/store"
@@ -69,7 +70,19 @@ func main() {
 		}()
 	}
 
-	app := server.New(st, auditIndex, cfg.AdminPassword)
+	chManager := channels.New(cfg)
+	stopChannels := func() {}
+	if chManager.Enabled() {
+		chCtx, cancelChannels := context.WithCancel(context.Background())
+		stopChannels = cancelChannels
+		chManager.Start(chCtx)
+		defer func() {
+			stopChannels()
+			chManager.Close()
+		}()
+	}
+
+	app := server.New(st, auditIndex, chManager, cfg.AdminPassword)
 	httpServer := &http.Server{
 		Addr:              cfg.Addr(),
 		Handler:           app.Handler(),
@@ -87,6 +100,7 @@ func main() {
 			"audit_enabled", auditIndex != nil && auditIndex.Enabled(),
 			"audit_glob", cfg.AuditLogGlob,
 			"audit_timezone", cfg.AuditTimezone,
+			"channels_enabled", chManager.Enabled(),
 		)
 		if err := httpServer.ListenAndServe(); err != nil && !server.IsServerClosed(err) {
 			slog.Error("server failed", "error", err)
@@ -99,6 +113,7 @@ func main() {
 	<-stop
 
 	stopAudit()
+	stopChannels()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := httpServer.Shutdown(ctx); err != nil {

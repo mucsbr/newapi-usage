@@ -6,17 +6,59 @@
     <title>NewAPI Usage</title>
     <style>
       :root {
-        color-scheme: light;
-        --bg: #f7f8fb;
-        --panel: #ffffff;
-        --line: #d9dee8;
-        --text: #18202f;
-        --muted: #667085;
+        color-scheme: light dark;
+        --radius: 16px;
+        --radius-sm: 10px;
+
+        --text: #1c2433;
+        --muted: #5b6677;
         --accent: #0f766e;
-        --accent-strong: #115e59;
+        --accent-strong: #0b5d56;
+        --good: #047857;
         --warn: #b45309;
         --bad: #b42318;
-        --good: #047857;
+
+        --glass-bg: rgba(255, 255, 255, 0.55);
+        --glass-bg-strong: rgba(255, 255, 255, 0.72);
+        --glass-border: rgba(255, 255, 255, 0.6);
+        --glass-shadow: 0 8px 30px rgba(15, 23, 42, 0.12);
+        --line: rgba(120, 130, 150, 0.22);
+        --th-bg: rgba(255, 255, 255, 0.7);
+        --selected: rgba(15, 118, 110, 0.12);
+        --input-bg: rgba(255, 255, 255, 0.55);
+        --pill-bg: rgba(255, 255, 255, 0.5);
+
+        --bg1: #e2eeff;
+        --bg2: #f2e7ff;
+        --bg3: #def9f1;
+        --bg-base: #eef2f9;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --text: #e8edf6;
+          --muted: #9aa6ba;
+          --accent: #2dd4bf;
+          --accent-strong: #5eead4;
+          --good: #34d399;
+          --warn: #fbbf24;
+          --bad: #f87171;
+
+          --glass-bg: rgba(30, 41, 59, 0.5);
+          --glass-bg-strong: rgba(30, 41, 59, 0.66);
+          --glass-border: rgba(255, 255, 255, 0.12);
+          --glass-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+          --line: rgba(148, 163, 184, 0.18);
+          --th-bg: rgba(30, 41, 59, 0.72);
+          --selected: rgba(45, 212, 191, 0.16);
+          --input-bg: rgba(15, 23, 42, 0.4);
+          --pill-bg: rgba(15, 23, 42, 0.4);
+
+          --bg1: #0b1f3a;
+          --bg2: #2a1b40;
+          --bg3: #07271f;
+          --bg-base: #0a0f1c;
+        }
       }
 
       * {
@@ -25,7 +67,7 @@
 
       body {
         margin: 0;
-        background: var(--bg);
+        min-height: 100vh;
         color: var(--text);
         font-family:
           ui-sans-serif,
@@ -36,11 +78,22 @@
           sans-serif;
         font-size: 14px;
         letter-spacing: 0;
+        background:
+          radial-gradient(900px 620px at 12% -8%, var(--bg1), transparent 60%),
+          radial-gradient(820px 600px at 100% 0%, var(--bg2), transparent 55%),
+          radial-gradient(940px 720px at 50% 120%, var(--bg3), transparent 55%),
+          var(--bg-base);
+        background-attachment: fixed;
       }
 
       header {
-        border-bottom: 1px solid var(--line);
-        background: var(--panel);
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        background: var(--glass-bg-strong);
+        backdrop-filter: blur(22px) saturate(180%);
+        -webkit-backdrop-filter: blur(22px) saturate(180%);
+        border-bottom: 1px solid var(--glass-border);
       }
 
       .wrap {
@@ -76,14 +129,18 @@
       }
 
       main {
-        padding: 18px 0 28px;
+        padding: 18px 0 32px;
       }
 
       .filters,
       .summary,
       .section {
-        background: var(--panel);
-        border: 1px solid var(--line);
+        background: var(--glass-bg);
+        backdrop-filter: blur(20px) saturate(180%);
+        -webkit-backdrop-filter: blur(20px) saturate(180%);
+        border: 1px solid var(--glass-border);
+        border-radius: var(--radius);
+        box-shadow: var(--glass-shadow);
       }
 
       .filters {
@@ -105,35 +162,49 @@
       select,
       button {
         height: 36px;
-        border: 1px solid var(--line);
-        border-radius: 6px;
-        background: #fff;
+        border: 1px solid var(--glass-border);
+        border-radius: var(--radius-sm);
+        background: var(--input-bg);
         color: var(--text);
-        padding: 0 10px;
+        padding: 0 12px;
         font: inherit;
+        backdrop-filter: blur(6px);
+        -webkit-backdrop-filter: blur(6px);
+      }
+
+      input::placeholder {
+        color: var(--muted);
       }
 
       button {
         cursor: pointer;
         background: var(--accent);
         color: #fff;
-        border-color: var(--accent);
+        border-color: transparent;
         font-weight: 600;
+        box-shadow: 0 4px 14px rgba(15, 118, 110, 0.32);
+      }
+
+      button:hover {
+        filter: brightness(1.05);
       }
 
       button:disabled {
         cursor: not-allowed;
-        opacity: 0.55;
+        opacity: 0.5;
+        box-shadow: none;
       }
 
       button.secondary {
-        background: #fff;
+        background: var(--glass-bg-strong);
         color: var(--accent-strong);
+        border: 1px solid var(--glass-border);
+        box-shadow: none;
       }
 
       button.small {
         height: 28px;
-        padding: 0 8px;
+        padding: 0 10px;
         font-size: 12px;
       }
 
@@ -141,6 +212,7 @@
         margin-top: 14px;
         display: grid;
         grid-template-columns: repeat(7, minmax(0, 1fr));
+        overflow: hidden;
       }
 
       .metric {
@@ -167,6 +239,145 @@
         overflow-wrap: anywhere;
       }
 
+      .channels {
+        margin-top: 14px;
+      }
+
+      .channels-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+        gap: 14px;
+        padding: 14px;
+      }
+
+      .channel-card {
+        background: var(--glass-bg-strong);
+        border: 1px solid var(--glass-border);
+        border-radius: var(--radius);
+        box-shadow: var(--glass-shadow);
+        padding: 16px;
+        display: grid;
+        gap: 12px;
+        align-content: start;
+      }
+
+      .channel-card-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .channel-name {
+        font-weight: 650;
+        font-size: 15px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .badge {
+        font-size: 11px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        border: 1px solid var(--glass-border);
+        background: var(--pill-bg);
+        color: var(--muted);
+        font-weight: 500;
+      }
+
+      .balance-hero {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+      }
+
+      .balance-hero strong {
+        font-size: 28px;
+        line-height: 1;
+        font-weight: 700;
+      }
+
+      .balance-hero .cur {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .balance-rows {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+
+      .balance-rows .kv span {
+        display: block;
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .balance-rows .kv strong {
+        font-size: 14px;
+        font-weight: 600;
+      }
+
+      .pool-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px 12px;
+      }
+
+      .pool-stat span {
+        display: block;
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .pool-stat strong {
+        font-size: 18px;
+        line-height: 1.2;
+      }
+
+      .pool-foot {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .pool-detail {
+        display: none;
+        gap: 6px;
+        max-height: 220px;
+        overflow: auto;
+        border-top: 1px solid var(--line);
+        padding-top: 10px;
+      }
+
+      .pool-detail.open {
+        display: grid;
+      }
+
+      .pool-account {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        font-size: 12px;
+      }
+
+      .pool-account .email {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .channel-error {
+        color: var(--bad);
+        font-size: 13px;
+      }
+
       .grid {
         margin-top: 14px;
         display: grid;
@@ -176,6 +387,7 @@
 
       .section {
         min-width: 0;
+        overflow: hidden;
       }
 
       .section-head {
@@ -186,6 +398,7 @@
         align-items: center;
         justify-content: space-between;
         gap: 10px;
+        flex-wrap: wrap;
       }
 
       .section-subtitle {
@@ -220,8 +433,10 @@
       th {
         position: sticky;
         top: 0;
-        background: #f2f4f8;
-        color: #475467;
+        background: var(--th-bg);
+        backdrop-filter: blur(12px) saturate(180%);
+        -webkit-backdrop-filter: blur(12px) saturate(180%);
+        color: var(--muted);
         font-size: 12px;
         z-index: 1;
       }
@@ -230,8 +445,12 @@
         cursor: pointer;
       }
 
+      tr[data-token-id]:hover {
+        background: var(--selected);
+      }
+
       tr.selected {
-        background: #e6fffb;
+        background: var(--selected);
       }
 
       .num {
@@ -249,21 +468,23 @@
         height: 22px;
         padding: 0 8px;
         border-radius: 999px;
-        border: 1px solid var(--line);
+        border: 1px solid var(--glass-border);
         font-size: 12px;
-        background: #fff;
+        background: var(--pill-bg);
+        backdrop-filter: blur(6px);
+        -webkit-backdrop-filter: blur(6px);
       }
 
       .pill.success {
         color: var(--good);
-        border-color: #a7f3d0;
-        background: #ecfdf5;
+        border-color: rgba(16, 185, 129, 0.35);
+        background: rgba(16, 185, 129, 0.14);
       }
 
       .pill.error {
         color: var(--bad);
-        border-color: #fecaca;
-        background: #fef2f2;
+        border-color: rgba(239, 68, 68, 0.35);
+        background: rgba(239, 68, 68, 0.14);
       }
 
       .logs {
@@ -314,9 +535,13 @@
 
       .login-panel {
         width: min(380px, calc(100vw - 32px));
-        background: var(--panel);
-        border: 1px solid var(--line);
-        padding: 20px;
+        background: var(--glass-bg-strong);
+        backdrop-filter: blur(24px) saturate(180%);
+        -webkit-backdrop-filter: blur(24px) saturate(180%);
+        border: 1px solid var(--glass-border);
+        border-radius: var(--radius);
+        box-shadow: var(--glass-shadow);
+        padding: 22px;
         display: grid;
         gap: 14px;
       }
@@ -339,7 +564,9 @@
         display: grid;
         place-items: center;
         padding: 24px;
-        background: rgb(15 23 42 / 0.36);
+        background: rgb(15 23 42 / 0.4);
+        backdrop-filter: blur(4px);
+        -webkit-backdrop-filter: blur(4px);
       }
 
       .modal.hidden {
@@ -349,8 +576,13 @@
       .modal-panel {
         width: min(1100px, calc(100vw - 32px));
         max-height: min(860px, calc(100vh - 48px));
-        background: var(--panel);
-        border: 1px solid var(--line);
+        background: var(--glass-bg-strong);
+        backdrop-filter: blur(24px) saturate(180%);
+        -webkit-backdrop-filter: blur(24px) saturate(180%);
+        border: 1px solid var(--glass-border);
+        border-radius: var(--radius);
+        box-shadow: var(--glass-shadow);
+        overflow: hidden;
         display: grid;
         grid-template-rows: auto minmax(0, 1fr);
       }
@@ -369,9 +601,11 @@
       }
 
       .audit-block {
-        border: 1px solid var(--line);
-        background: #fff;
+        border: 1px solid var(--glass-border);
+        border-radius: var(--radius-sm);
+        background: var(--glass-bg);
         min-width: 0;
+        overflow: hidden;
       }
 
       .audit-block h3 {
@@ -415,8 +649,9 @@
         padding: 12px;
         max-height: 580px;
         overflow: auto;
-        background: #0f172a;
+        background: rgb(15 23 42 / 0.92);
         color: #e5e7eb;
+        border-radius: var(--radius-sm);
       }
 
       @media (max-width: 1100px) {
@@ -456,6 +691,10 @@
 
         .metric {
           border-right: 0;
+        }
+
+        .channels-grid {
+          grid-template-columns: 1fr;
         }
       }
     </style>
@@ -521,6 +760,17 @@
 
       <section class="summary" id="summary"></section>
 
+      <section class="section channels app-hidden" id="channelsSection">
+        <div class="section-head">
+          <div>
+            <h2>渠道余额</h2>
+            <div class="section-subtitle">外部渠道余额 / 额度</div>
+          </div>
+          <span id="channelsMeta" class="pill">-</span>
+        </div>
+        <div class="channels-grid" id="channelsGrid"></div>
+      </section>
+
       <section class="grid">
         <div class="section">
           <div class="section-head">
@@ -581,6 +831,7 @@
             <div id="logsMeta" class="section-subtitle">最近请求</div>
           </div>
           <div class="log-controls">
+            <input id="logKeyName" placeholder="Key 名称筛选" />
             <select id="logType">
               <option value="all">全部</option>
               <option value="success">成功</option>
@@ -649,9 +900,12 @@
       const state = {
         selectedTokenId: 0,
         selectedKeyName: "",
+        logKeyName: "",
         page: 1,
         pageSize: 100,
       };
+
+      let channelsRetry = 0;
 
       const el = (id) => document.getElementById(id);
       const fmt = new Intl.NumberFormat("zh-CN");
@@ -745,6 +999,124 @@
           .join("");
       }
 
+      async function loadChannels() {
+        const data = await api("/api/channels/balance");
+        renderChannels(data);
+      }
+
+      function renderChannels(data) {
+        const section = el("channelsSection");
+        const list = data && data.channels ? data.channels : [];
+        if (!data || !data.enabled || !list.length) {
+          section.classList.add("app-hidden");
+          return;
+        }
+        section.classList.remove("app-hidden");
+        el("channelsMeta").textContent = `${list.length} 渠道`;
+        el("channelsGrid").innerHTML = list.map(channelCardHTML).join("");
+        document.querySelectorAll("[data-pool-toggle]").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const detail = document.querySelector(`[data-pool-detail="${btn.dataset.poolToggle}"]`);
+            if (detail) detail.classList.toggle("open");
+          });
+        });
+        const refreshing = list.some((c) => !c.ok && c.error === "refreshing");
+        if (refreshing && channelsRetry < 5) {
+          channelsRetry += 1;
+          setTimeout(() => loadChannels().catch((error) => console.error(error)), 4000);
+        } else {
+          channelsRetry = 0;
+        }
+      }
+
+      function channelCardHTML(c) {
+        return c.kind === "pool" ? poolCardHTML(c) : currencyCardHTML(c);
+      }
+
+      function cardShell(c, statusPill, bodyHTML) {
+        const kindBadge = c.kind === "pool" ? "账号池" : "余额";
+        return `
+          <div class="channel-card">
+            <div class="channel-card-head">
+              <div class="channel-name">${escapeHtml(c.label || c.channel)} <span class="badge">${kindBadge}</span></div>
+              ${statusPill}
+            </div>
+            ${bodyHTML}
+          </div>
+        `;
+      }
+
+      function currencyCardHTML(c) {
+        if (!c.ok) {
+          return cardShell(c, `<span class="pill error">异常</span>`, `<div class="channel-error">${escapeHtml(c.error || "获取失败")}</div>`);
+        }
+        const statusPill = c.is_available === false ? `<span class="pill error">不可用</span>` : `<span class="pill success">可用</span>`;
+        const list = c.currencies || [];
+        if (!list.length) {
+          return cardShell(c, statusPill, `<div class="muted">无余额数据</div>`);
+        }
+        const primary = list[0];
+        const hero = `<div class="balance-hero"><strong>${escapeHtml(primary.total_balance)}</strong><span class="cur">${escapeHtml(primary.currency)} 总余额</span></div>`;
+        const rows = list
+          .map(
+            (info) => `
+              <div class="balance-rows">
+                <div class="kv"><span>赠金 ${escapeHtml(info.currency)}</span><strong>${escapeHtml(info.granted_balance)}</strong></div>
+                <div class="kv"><span>充值 ${escapeHtml(info.currency)}</span><strong>${escapeHtml(info.topped_up_balance)}</strong></div>
+              </div>
+            `,
+          )
+          .join("");
+        return cardShell(c, statusPill, hero + rows);
+      }
+
+      function poolCardHTML(c) {
+        if (!c.ok) {
+          const refreshing = c.error === "refreshing";
+          const pill = refreshing ? `<span class="pill">刷新中</span>` : `<span class="pill error">异常</span>`;
+          const msg = refreshing ? "正在探测账号额度，请稍候…" : c.error || "获取失败";
+          return cardShell(c, pill, `<div class="channel-error">${escapeHtml(msg)}</div>`);
+        }
+        const p = c.pool || {};
+        const pill = `<span class="pill success">${fmt.format(p.total || 0)} 账号</span>`;
+        const stats = `
+          <div class="pool-grid">
+            <div class="pool-stat"><span>总数</span><strong>${fmt.format(p.total || 0)}</strong></div>
+            <div class="pool-stat"><span>健康</span><strong>${fmt.format(p.healthy || 0)}</strong></div>
+            <div class="pool-stat"><span>付费</span><strong>${fmt.format(p.paid || 0)}</strong></div>
+            <div class="pool-stat"><span>耗尽</span><strong>${fmt.format(p.exhausted || 0)}</strong></div>
+            <div class="pool-stat"><span>错误</span><strong>${fmt.format(p.errors || 0)}</strong></div>
+            <div class="pool-stat"><span>平均剩余</span><strong>${(p.avg_remaining_percent || 0).toFixed(1)}%</strong></div>
+          </div>
+        `;
+        const accounts = p.accounts || [];
+        const detailBtn = accounts.length
+          ? `<button class="secondary small" type="button" data-pool-toggle="${escapeHtml(c.channel)}">明细 (${accounts.length})</button>`
+          : "";
+        const foot = `<div class="pool-foot"><span>更新于 ${tsToText(c.updated_at)}</span>${detailBtn}</div>`;
+        const detail = accounts.length
+          ? `<div class="pool-detail" data-pool-detail="${escapeHtml(c.channel)}">${accounts.map(poolAccountHTML).join("")}</div>`
+          : "";
+        return cardShell(c, pill, stats + foot + detail);
+      }
+
+      function poolAccountHTML(a) {
+        let right;
+        if (a.error) {
+          right = `<span class="pill error">${escapeHtml(a.error)}</span>`;
+        } else if (a.paid) {
+          right = `<span class="pill">付费</span>`;
+        } else if (a.remaining_percent != null) {
+          const value = a.remaining_percent;
+          const cls = value <= 10 ? "error" : value <= 30 ? "" : "success";
+          right = `<span class="pill ${cls}">剩余 ${value.toFixed(1)}%</span>`;
+        } else {
+          right = `<span class="pill">未知</span>`;
+        }
+        const label = a.email || a.name || "-";
+        return `<div class="pool-account"><span class="email" title="${escapeHtml(label)}">${escapeHtml(label)}</span>${right}</div>`;
+      }
+
       function renderKeys(items) {
         el("keyCount").textContent = `${items.length} keys`;
         if (!items.length) {
@@ -774,6 +1146,8 @@
           row.addEventListener("click", () => {
             state.selectedTokenId = Number(row.dataset.tokenId);
             state.selectedKeyName = row.dataset.keyName;
+            state.logKeyName = "";
+            el("logKeyName").value = "";
             state.page = 1;
             loadModels();
             loadLogs();
@@ -931,11 +1305,8 @@
         const [summary, keys] = await Promise.all([api("/api/summary", params), api("/api/keys", keyParams)]);
         renderSummary(summary);
         renderKeys(keys);
-        if (!state.selectedTokenId && keys.length) {
-          state.selectedTokenId = Number(keys[0].token_id);
-          state.selectedKeyName = keys[0].key_name || `Token #${keys[0].token_id}`;
-          refreshKeySelection();
-        }
+        refreshKeySelection();
+        loadChannels().catch((error) => console.error(error));
         await Promise.all([loadModels(), loadLogs()]);
       }
 
@@ -952,7 +1323,11 @@
 
       async function loadLogs() {
         const params = baseParams();
-        if (state.selectedTokenId) params.set("token_id", state.selectedTokenId);
+        if (state.selectedTokenId) {
+          params.set("token_id", state.selectedTokenId);
+        } else if (state.logKeyName) {
+          params.set("key_name", state.logKeyName);
+        }
         const model = el("logModel").value.trim();
         if (model) params.set("model", model);
         params.set("type", el("logType").value);
@@ -1000,6 +1375,7 @@
         await postJSON("/api/auth/logout");
         state.selectedTokenId = 0;
         state.selectedKeyName = "";
+        state.logKeyName = "";
         state.page = 1;
         showLogin();
       }
@@ -1036,9 +1412,11 @@
         setDefaultTimeRange();
         el("search").value = "";
         el("logModel").value = "";
+        el("logKeyName").value = "";
         el("logType").value = "all";
         state.selectedTokenId = 0;
         state.selectedKeyName = "";
+        state.logKeyName = "";
         state.page = 1;
         loadAll().catch(notifyError);
       });
@@ -1053,6 +1431,17 @@
       el("logType").addEventListener("change", () => {
         state.page = 1;
         loadLogs().catch(notifyError);
+      });
+      el("logKeyName").addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          state.logKeyName = el("logKeyName").value.trim();
+          state.selectedTokenId = 0;
+          state.selectedKeyName = "";
+          state.page = 1;
+          refreshKeySelection();
+          loadModels();
+          loadLogs().catch(notifyError);
+        }
       });
       el("logModel").addEventListener("keydown", (event) => {
         if (event.key === "Enter") {

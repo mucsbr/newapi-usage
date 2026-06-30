@@ -22,6 +22,7 @@ type LogFilter struct {
 	TokenID  int64
 	Model    string
 	Query    string
+	KeyName  string
 	LogType  string
 	Page     int
 	PageSize int
