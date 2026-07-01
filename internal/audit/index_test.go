@@ -392,6 +392,89 @@ func TestIndexerMigratesOldAuditSchema(t *testing.T) {
 	}
 }
 
+func TestIndexerCompressesLegacyBodyOnOpen(t *testing.T) {
+	dir := t.TempDir()
+	indexPath := filepath.Join(dir, "audit.db")
+	body := `{"model":"gpt-4o","messages":[{"role":"user","content":"legacy body"}]}`
+
+	db, err := sql.Open("sqlite", indexPath)
+	if err != nil {
+		t.Fatalf("open old sqlite: %v", err)
+	}
+	execMany(t, db, []string{
+		`CREATE TABLE audit_entries (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			source_id TEXT NOT NULL,
+			source_path TEXT NOT NULL,
+			source_line INTEGER NOT NULL,
+			byte_offset INTEGER NOT NULL,
+			created_at INTEGER NOT NULL,
+			ingested_at INTEGER NOT NULL,
+			method TEXT NOT NULL DEFAULT '',
+			path TEXT NOT NULL DEFAULT '',
+			model TEXT NOT NULL DEFAULT '',
+			token_id INTEGER NOT NULL DEFAULT 0,
+			key_tail TEXT NOT NULL DEFAULT '',
+			key_hash TEXT NOT NULL DEFAULT '',
+			request_id TEXT NOT NULL DEFAULT '',
+			has_timestamp INTEGER NOT NULL DEFAULT 0,
+			body TEXT NOT NULL,
+			UNIQUE(source_id, source_line)
+		)`,
+	})
+	if _, err := db.Exec(`INSERT INTO audit_entries (
+		source_id, source_path, source_line, byte_offset, created_at, ingested_at,
+		method, path, model, token_id, key_tail, key_hash, request_id, has_timestamp, body
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"source-1",
+		"/audit/request-body.jsonl",
+		1,
+		0,
+		1000,
+		1001,
+		"POST",
+		"/v1/chat/completions",
+		"gpt-4o",
+		7,
+		"sk-prod",
+		"hash",
+		"",
+		1,
+		body,
+	); err != nil {
+		t.Fatalf("insert legacy body: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close old sqlite: %v", err)
+	}
+
+	idx, err := Open(Config{
+		IndexDSN: indexPath,
+	}, nil)
+	if err != nil {
+		t.Fatalf("open indexer: %v", err)
+	}
+	defer idx.Close()
+
+	var storedBody string
+	var compressedLen int
+	var bodyEncoding string
+	if err := idx.db.QueryRow(`SELECT body, length(body_gzip), body_encoding FROM audit_entries WHERE id = 1`).Scan(&storedBody, &compressedLen, &bodyEncoding); err != nil {
+		t.Fatalf("read compressed body fields: %v", err)
+	}
+	if storedBody != "" || compressedLen <= 0 || bodyEncoding != bodyEncodingGzip {
+		t.Fatalf("legacy body was not compressed: body_len=%d compressed_len=%d encoding=%q", len(storedBody), compressedLen, bodyEncoding)
+	}
+
+	items, err := idx.Lookup(context.Background(), LookupFilter{TokenID: 7, Model: "gpt-4o", CreatedAt: 1000})
+	if err != nil {
+		t.Fatalf("lookup: %v", err)
+	}
+	if len(items) != 1 || items[0].Messages[0].Content != "legacy body" {
+		t.Fatalf("unexpected decoded legacy body: %+v", items)
+	}
+}
+
 func assertIndexedRows(t *testing.T, idx *Indexer, want int64) {
 	t.Helper()
 	status, err := idx.Status(context.Background())

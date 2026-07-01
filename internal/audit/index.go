@@ -443,6 +443,9 @@ func (i *Indexer) initSchema(ctx context.Context) error {
 			return err
 		}
 	}
+	if err := i.compressLegacyBodies(ctx); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -471,6 +474,73 @@ func (i *Indexer) addColumnIfMissing(ctx context.Context, table string, column s
 	}
 	_, err = i.db.ExecContext(ctx, fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s %s`, table, column, definition))
 	return err
+}
+
+func (i *Indexer) compressLegacyBodies(ctx context.Context) error {
+	const batchSize = 200
+	total := 0
+	for {
+		rows, err := i.db.QueryContext(ctx, `SELECT id, body
+			FROM audit_entries
+			WHERE body <> '' AND NOT (body_encoding = ? AND COALESCE(length(body_gzip), 0) > 0)
+			ORDER BY id
+			LIMIT ?`, bodyEncodingGzip, batchSize)
+		if err != nil {
+			return err
+		}
+		type legacyBody struct {
+			id   int64
+			body string
+		}
+		batch := make([]legacyBody, 0, batchSize)
+		for rows.Next() {
+			var item legacyBody
+			if err := rows.Scan(&item.id, &item.body); err != nil {
+				rows.Close()
+				return err
+			}
+			batch = append(batch, item)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		rows.Close()
+		if len(batch) == 0 {
+			break
+		}
+
+		tx, err := i.db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		for _, item := range batch {
+			bodyGzip, bodyEncoding, err := encodeBody(item.body)
+			if err != nil {
+				tx.Rollback()
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE audit_entries
+				SET body = '', body_gzip = ?, body_encoding = ?
+				WHERE id = ? AND body <> ''`, bodyGzip, bodyEncoding, item.id); err != nil {
+				tx.Rollback()
+				return err
+			}
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		total += len(batch)
+	}
+	if total > 0 {
+		slog.Info("compressed legacy audit bodies", "rows", total)
+	}
+	if _, err := i.db.ExecContext(ctx, `UPDATE audit_entries
+		SET body = ''
+		WHERE body <> '' AND body_encoding = ? AND COALESCE(length(body_gzip), 0) > 0`, bodyEncodingGzip); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (i *Indexer) ingestPath(ctx context.Context, path string, maxLines int) (fileScanResult, error) {
