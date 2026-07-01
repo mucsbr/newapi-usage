@@ -392,7 +392,7 @@ func TestIndexerMigratesOldAuditSchema(t *testing.T) {
 	}
 }
 
-func TestIndexerCompressesLegacyBodyOnOpen(t *testing.T) {
+func TestIndexerCompressesLegacyBodyInMaintenance(t *testing.T) {
 	dir := t.TempDir()
 	indexPath := filepath.Join(dir, "audit.db")
 	body := `{"model":"gpt-4o","messages":[{"role":"user","content":"legacy body"}]}`
@@ -455,6 +455,18 @@ func TestIndexerCompressesLegacyBodyOnOpen(t *testing.T) {
 		t.Fatalf("open indexer: %v", err)
 	}
 	defer idx.Close()
+
+	var bodyBeforeMaintenance string
+	if err := idx.db.QueryRow(`SELECT body FROM audit_entries WHERE id = 1`).Scan(&bodyBeforeMaintenance); err != nil {
+		t.Fatalf("read body before maintenance: %v", err)
+	}
+	if bodyBeforeMaintenance != body {
+		t.Fatalf("open should not block on legacy compression: body=%q", bodyBeforeMaintenance)
+	}
+
+	if err := idx.compressLegacyBodies(context.Background()); err != nil {
+		t.Fatalf("compress legacy bodies: %v", err)
+	}
 
 	var storedBody string
 	var compressedLen int

@@ -69,6 +69,12 @@ type fileScanResult struct {
 	BytesRead       int64
 }
 
+const (
+	legacyBodyCompressionName      = "legacy_body_gzip"
+	legacyBodyCompressionBatchSize = 50
+	legacyBodyCompressionPause     = 200 * time.Millisecond
+)
+
 func (s *scanStats) add(result fileScanResult) {
 	s.ScannedFiles += result.ScannedFiles
 	s.UnchangedFiles += result.UnchangedFiles
@@ -126,6 +132,11 @@ func (i *Indexer) Start(ctx context.Context) {
 	go func() {
 		defer i.wg.Done()
 		i.run(ctx)
+	}()
+	i.wg.Add(1)
+	go func() {
+		defer i.wg.Done()
+		i.runLegacyBodyCompression(ctx)
 	}()
 }
 
@@ -416,6 +427,12 @@ func (i *Indexer) initSchema(ctx context.Context) error {
 			matched_note TEXT NOT NULL DEFAULT '',
 			matched_at INTEGER NOT NULL DEFAULT 0
 		)`,
+		`CREATE TABLE IF NOT EXISTS audit_maintenance (
+			name TEXT PRIMARY KEY,
+			cursor INTEGER NOT NULL DEFAULT 0,
+			completed_at INTEGER NOT NULL DEFAULT 0,
+			updated_at INTEGER NOT NULL DEFAULT 0
+		)`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_entries_token_time ON audit_entries(token_id, created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_entries_request_id ON audit_entries(request_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_entries_model ON audit_entries(model)`,
@@ -442,9 +459,6 @@ func (i *Indexer) initSchema(ctx context.Context) error {
 		if err := i.addColumnIfMissing(ctx, "audit_entries", column.name, column.definition); err != nil {
 			return err
 		}
-	}
-	if err := i.compressLegacyBodies(ctx); err != nil {
-		return err
 	}
 	return nil
 }
@@ -476,71 +490,148 @@ func (i *Indexer) addColumnIfMissing(ctx context.Context, table string, column s
 	return err
 }
 
-func (i *Indexer) compressLegacyBodies(ctx context.Context) error {
-	const batchSize = 200
-	total := 0
-	for {
-		rows, err := i.db.QueryContext(ctx, `SELECT id, body
-			FROM audit_entries
-			WHERE body <> '' AND NOT (body_encoding = ? AND COALESCE(length(body_gzip), 0) > 0)
-			ORDER BY id
-			LIMIT ?`, bodyEncodingGzip, batchSize)
-		if err != nil {
-			return err
-		}
-		type legacyBody struct {
-			id   int64
-			body string
-		}
-		batch := make([]legacyBody, 0, batchSize)
-		for rows.Next() {
-			var item legacyBody
-			if err := rows.Scan(&item.id, &item.body); err != nil {
-				rows.Close()
-				return err
-			}
-			batch = append(batch, item)
-		}
-		if err := rows.Err(); err != nil {
-			rows.Close()
-			return err
-		}
-		rows.Close()
-		if len(batch) == 0 {
-			break
-		}
+type legacyBody struct {
+	id           int64
+	body         string
+	bodyGzipLen  int64
+	bodyEncoding string
+}
 
-		tx, err := i.db.BeginTx(ctx, nil)
-		if err != nil {
-			return err
-		}
-		for _, item := range batch {
-			bodyGzip, bodyEncoding, err := encodeBody(item.body)
-			if err != nil {
-				tx.Rollback()
-				return err
-			}
-			if _, err := tx.ExecContext(ctx, `UPDATE audit_entries
-				SET body = '', body_gzip = ?, body_encoding = ?
-				WHERE id = ? AND body <> ''`, bodyGzip, bodyEncoding, item.id); err != nil {
-				tx.Rollback()
-				return err
-			}
-		}
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-		total += len(batch)
+func (i *Indexer) runLegacyBodyCompression(ctx context.Context) {
+	if err := i.compressLegacyBodies(ctx); err != nil && ctx.Err() == nil {
+		slog.Warn("legacy audit body compression failed", "error", err)
 	}
-	if total > 0 {
-		slog.Info("compressed legacy audit bodies", "rows", total)
-	}
-	if _, err := i.db.ExecContext(ctx, `UPDATE audit_entries
-		SET body = ''
-		WHERE body <> '' AND body_encoding = ? AND COALESCE(length(body_gzip), 0) > 0`, bodyEncodingGzip); err != nil {
+}
+
+func (i *Indexer) compressLegacyBodies(ctx context.Context) error {
+	cursor, completedAt, err := i.legacyCompressionState(ctx)
+	if err != nil {
 		return err
 	}
-	return nil
+	if completedAt > 0 {
+		return nil
+	}
+
+	total := 0
+	slog.Info("legacy audit body compression started", "cursor", cursor, "batch_size", legacyBodyCompressionBatchSize)
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		batch, err := i.nextLegacyBodyBatch(ctx, cursor)
+		if err != nil {
+			return err
+		}
+		if len(batch) == 0 {
+			now := time.Now().Unix()
+			if err := i.saveLegacyCompressionState(ctx, cursor, now); err != nil {
+				return err
+			}
+			slog.Info("legacy audit body compression completed", "rows", total, "cursor", cursor)
+			return nil
+		}
+
+		processed, nextCursor, err := i.compressLegacyBodyBatch(ctx, batch)
+		if err != nil {
+			return err
+		}
+		total += processed
+		cursor = nextCursor
+		if err := i.saveLegacyCompressionState(ctx, cursor, 0); err != nil {
+			return err
+		}
+		slog.Info("legacy audit body compression batch", "rows", processed, "total_rows", total, "cursor", cursor)
+
+		timer := time.NewTimer(legacyBodyCompressionPause)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func (i *Indexer) legacyCompressionState(ctx context.Context) (int64, int64, error) {
+	var cursor int64
+	var completedAt int64
+	err := i.db.QueryRowContext(ctx, `SELECT cursor, completed_at FROM audit_maintenance WHERE name = ?`, legacyBodyCompressionName).Scan(&cursor, &completedAt)
+	if err == nil {
+		return cursor, completedAt, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return 0, 0, err
+	}
+	now := time.Now().Unix()
+	if _, err := i.db.ExecContext(ctx, `INSERT INTO audit_maintenance (name, cursor, completed_at, updated_at) VALUES (?, 0, 0, ?)`, legacyBodyCompressionName, now); err != nil {
+		return 0, 0, err
+	}
+	return 0, 0, nil
+}
+
+func (i *Indexer) saveLegacyCompressionState(ctx context.Context, cursor int64, completedAt int64) error {
+	now := time.Now().Unix()
+	_, err := i.db.ExecContext(ctx, `INSERT INTO audit_maintenance (name, cursor, completed_at, updated_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(name) DO UPDATE SET
+			cursor = excluded.cursor,
+			completed_at = excluded.completed_at,
+			updated_at = excluded.updated_at`, legacyBodyCompressionName, cursor, completedAt, now)
+	return err
+}
+
+func (i *Indexer) nextLegacyBodyBatch(ctx context.Context, cursor int64) ([]legacyBody, error) {
+	rows, err := i.db.QueryContext(ctx, `SELECT id, body, COALESCE(length(body_gzip), 0), body_encoding
+		FROM audit_entries
+		WHERE id > ? AND body <> ''
+		ORDER BY id
+		LIMIT ?`, cursor, legacyBodyCompressionBatchSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	batch := make([]legacyBody, 0, legacyBodyCompressionBatchSize)
+	for rows.Next() {
+		var item legacyBody
+		if err := rows.Scan(&item.id, &item.body, &item.bodyGzipLen, &item.bodyEncoding); err != nil {
+			return nil, err
+		}
+		batch = append(batch, item)
+	}
+	return batch, rows.Err()
+}
+
+func (i *Indexer) compressLegacyBodyBatch(ctx context.Context, batch []legacyBody) (int, int64, error) {
+	tx, err := i.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer tx.Rollback()
+
+	var cursor int64
+	for _, item := range batch {
+		cursor = item.id
+		if item.bodyEncoding == bodyEncodingGzip && item.bodyGzipLen > 0 {
+			if _, err := tx.ExecContext(ctx, `UPDATE audit_entries SET body = '' WHERE id = ? AND body <> ''`, item.id); err != nil {
+				return 0, 0, err
+			}
+			continue
+		}
+		bodyGzip, bodyEncoding, err := encodeBody(item.body)
+		if err != nil {
+			return 0, 0, err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE audit_entries
+			SET body = '', body_gzip = ?, body_encoding = ?
+			WHERE id = ? AND body <> ''`, bodyGzip, bodyEncoding, item.id); err != nil {
+			return 0, 0, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, 0, err
+	}
+	return len(batch), cursor, nil
 }
 
 func (i *Indexer) ingestPath(ctx context.Context, path string, maxLines int) (fileScanResult, error) {
