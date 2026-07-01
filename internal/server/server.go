@@ -94,6 +94,7 @@ func (s *Server) handleKeys(w http.ResponseWriter, r *http.Request) {
 		TimeRange: parseTimeRange(r),
 		Query:     q.Get("q"),
 		Limit:     clampInt(queryInt(r, "limit", 100), 1, 500),
+		Sort:      q.Get("sort"),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

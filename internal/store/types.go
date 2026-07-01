@@ -9,6 +9,7 @@ type KeyFilter struct {
 	TimeRange
 	Query string
 	Limit int
+	Sort  string
 }
 
 type ModelFilter struct {

@@ -83,6 +83,26 @@ func TestStoreQueries(t *testing.T) {
 		t.Fatalf("unexpected first key: %+v", keys[0])
 	}
 
+	execMany(t, db, []string{
+		`INSERT INTO tokens (id, user_id, key, name) VALUES
+			(3, 30, 'sortbyrequests0000', 'busy-key')`,
+		`INSERT INTO logs (
+			id, user_id, created_at, type, content, username, token_name, model_name,
+			quota, prompt_tokens, completion_tokens, use_time, is_stream, channel_id,
+			channel_name, token_id, ip, other, request_id
+		) VALUES
+			(4, 30, 1003, 2, 'ok', 'carol', 'busy-key', 'gpt-4o', 1, 1, 0, 10, 0, 7, 'openai', 3, '3.3.3.3', '{}', 'req-4'),
+			(5, 30, 1004, 2, 'ok', 'carol', 'busy-key', 'gpt-4o', 1, 1, 0, 10, 0, 7, 'openai', 3, '3.3.3.3', '{}', 'req-5'),
+			(6, 30, 1005, 2, 'ok', 'carol', 'busy-key', 'gpt-4o', 1, 1, 0, 10, 0, 7, 'openai', 3, '3.3.3.3', '{}', 'req-6')`,
+	})
+	requestSortedKeys, err := s.KeyUsage(context.Background(), KeyFilter{Limit: 10, Sort: "requests"})
+	if err != nil {
+		t.Fatalf("key usage by requests: %v", err)
+	}
+	if requestSortedKeys[0].TokenID != 3 || requestSortedKeys[0].RequestCount != 3 {
+		t.Fatalf("unexpected request-sorted first key: %+v", requestSortedKeys[0])
+	}
+
 	models, err := s.ModelUsage(context.Background(), ModelFilter{TokenID: 1, Limit: 10})
 	if err != nil {
 		t.Fatalf("model usage: %v", err)

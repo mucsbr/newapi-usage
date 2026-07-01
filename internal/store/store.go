@@ -119,6 +119,11 @@ func (s *Store) KeyUsage(ctx context.Context, filter KeyFilter) ([]KeyUsage, err
 	if s.showFullKeys {
 		keyValueSelect = fmt.Sprintf("COALESCE(MAX(%s), '') AS key_value,", s.tokenKeyColumn("t"))
 	}
+	orderBy := "total_tokens DESC, request_count DESC"
+	switch strings.ToLower(strings.TrimSpace(filter.Sort)) {
+	case "requests", "request_count", "calls":
+		orderBy = "request_count DESC, total_tokens DESC"
+	}
 	query := fmt.Sprintf(`
 		SELECT
 			COALESCE(l.token_id, 0) AS token_id,
@@ -141,8 +146,8 @@ func (s *Store) KeyUsage(ctx context.Context, filter KeyFilter) ([]KeyUsage, err
 		LEFT JOIN tokens t ON t.id = l.token_id
 		%s
 		GROUP BY l.token_id
-		ORDER BY total_tokens DESC, request_count DESC
-		LIMIT %s`, s.keyTailExpr("t"), keyValueSelect, where, s.placeholder(len(args)))
+		ORDER BY %s
+		LIMIT %s`, s.keyTailExpr("t"), keyValueSelect, where, orderBy, s.placeholder(len(args)))
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
