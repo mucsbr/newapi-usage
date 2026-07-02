@@ -427,45 +427,44 @@
 
       .sub2-list {
         display: grid;
-        gap: 10px;
-        max-height: 420px;
+        gap: 6px;
+        max-height: 320px;
         overflow: auto;
         border-top: 1px solid var(--line);
         padding-top: 10px;
       }
 
       .sub2-account {
-        display: grid;
-        gap: 8px;
-        padding: 10px;
-        border: 1px solid var(--line);
-        border-radius: var(--radius-sm);
-        background: rgba(255, 255, 255, 0.18);
-      }
-
-      .sub2-account-head,
-      .sub2-account-foot {
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 10px;
+        font-size: 12px;
       }
 
       .sub2-account-title {
+        display: block;
         font-weight: 650;
       }
 
+      .sub2-account-kind {
+        margin-left: 4px;
+        color: var(--muted);
+        font-weight: 400;
+      }
+
       .sub2-meta,
+      .sub2-right,
       .sub2-usage {
         display: flex;
         align-items: center;
         gap: 6px;
-        flex-wrap: wrap;
       }
 
-      .sub2-meta {
-        color: var(--muted);
-        font-size: 12px;
+      .sub2-right,
+      .sub2-usage {
+        flex-shrink: 0;
+        white-space: nowrap;
       }
 
       .sub2-refresh {
@@ -1287,32 +1286,31 @@
 
       function sub2AccountHTML(a) {
         const title = a.email || a.name || `Account #${a.id}`;
-        const groups = (a.groups || []).length ? ` · ${a.groups.join(", ")}` : "";
-        const proxy = a.proxy_name ? ` · ${a.proxy_name}` : "";
-        const status = a.schedulable ? `<span class="pill success">可调度</span>` : `<span class="pill error">不可调度</span>`;
-        const error = a.error_message ? `<span class="pill error">${escapeHtml(a.error_message)}</span>` : "";
+        const details = [
+          `#${a.id}`,
+          a.type || "",
+          a.status || "",
+          (a.groups || [])[0] || "",
+          a.proxy_name || "",
+          `${fmt.format(a.current_concurrency || 0)}/${fmt.format(a.concurrency || 0)} 并发`,
+          a.schedulable ? "可调度" : "不可调度",
+          a.error_message || "",
+        ]
+          .filter(Boolean)
+          .join(" · ");
         const usage = sub2UsageHTML(a.usage_windows || []);
         const refresh = a.can_refresh_usage
-          ? `<button class="secondary small sub2-refresh" type="button" data-account-id="${a.id}"><span class="refresh-icon" aria-hidden="true"></span>实时</button>`
+          ? `<button class="secondary small sub2-refresh" type="button" data-account-id="${a.id}" title="获取实时额度"><span class="refresh-icon" aria-hidden="true"></span>实时</button>`
           : "";
         return `
-          <div class="sub2-account" data-sub2-account-id="${a.id}">
-            <div class="sub2-account-head">
-              <div class="sub2-account-title" title="${escapeHtml(title)}">${escapeHtml(title)}</div>
+          <div class="sub2-account" data-sub2-account-id="${a.id}" title="${escapeHtml(details)}">
+            <span class="sub2-account-title">
+              ${escapeHtml(title)}
+              <span class="sub2-account-kind">${escapeHtml(a.type || "-")}</span>
+            </span>
+            <div class="sub2-right">
+              <span class="sub2-usage" data-sub2-usage="${a.id}">${usage}</span>
               ${refresh}
-            </div>
-            <div class="sub2-meta">
-              <span>#${a.id}</span>
-              <span>${escapeHtml(a.platform || "-")}/${escapeHtml(a.type || "-")}</span>
-              <span>${escapeHtml(a.status || "-")}</span>
-              <span>${fmt.format(a.current_concurrency || 0)}/${fmt.format(a.concurrency || 0)} 并发</span>
-              <span>${escapeHtml(groups.replace(/^ · /, ""))}${escapeHtml(proxy)}</span>
-              ${status}
-              ${error}
-            </div>
-            <div class="sub2-account-foot">
-              <div class="sub2-usage" data-sub2-usage="${a.id}">${usage}</div>
-              <span class="muted">${escapeHtml(shortTime(a.last_used_at || a.updated_at || ""))}</span>
             </div>
           </div>
         `;
