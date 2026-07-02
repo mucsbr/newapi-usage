@@ -103,6 +103,7 @@ type Sub2APIUsageWindow struct {
 	Name             string  `json:"name"`
 	Source           string  `json:"source"`
 	UsedPercent      float64 `json:"used_percent"`
+	RemainingPercent float64 `json:"remaining_percent"`
 	ResetsAt         string  `json:"resets_at,omitempty"`
 	RemainingSeconds int64   `json:"remaining_seconds,omitempty"`
 	Requests         int64   `json:"requests,omitempty"`

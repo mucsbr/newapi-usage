@@ -150,7 +150,7 @@ SUB2API_TIMEZONE=Asia/Shanghai
 SUB2API_PAGE_SIZE=50
 ```
 
-The card lists accounts from `/api/v1/admin/accounts`. If account-list metadata includes usage fields, those are shown as estimated used percentages. OAuth accounts also show a live refresh button that calls `/api/v1/admin/accounts/{id}/usage`.
+The card lists accounts from `/api/v1/admin/accounts`. If account-list metadata includes usage fields, those are shown as estimated remaining percentages. OAuth accounts also show a live refresh button that calls `/api/v1/admin/accounts/{id}/usage`.
 
 ## API
 

@@ -31,6 +31,9 @@ func TestSub2APIAccountUsageNormalization(t *testing.T) {
 	if account.UsageWindows[0].UsedPercent != 3 {
 		t.Fatalf("session usage = %f", account.UsageWindows[0].UsedPercent)
 	}
+	if account.UsageWindows[0].RemainingPercent != 97 {
+		t.Fatalf("session remaining = %f", account.UsageWindows[0].RemainingPercent)
+	}
 }
 
 func TestSub2APILiveUsage(t *testing.T) {
@@ -58,7 +61,10 @@ func TestSub2APILiveUsage(t *testing.T) {
 	if windows[0].UsedPercent != 3 || windows[0].Requests != 119 || windows[0].Tokens != 17278452 {
 		t.Fatalf("unexpected five-hour usage: %+v", windows[0])
 	}
-	if windows[1].UsedPercent != 0 || windows[1].RemainingSeconds != 593046 {
+	if windows[0].RemainingPercent != 97 {
+		t.Fatalf("unexpected five-hour remaining: %+v", windows[0])
+	}
+	if windows[1].UsedPercent != 0 || windows[1].RemainingPercent != 100 || windows[1].RemainingSeconds != 593046 {
 		t.Fatalf("unexpected seven-day usage: %+v", windows[1])
 	}
 }

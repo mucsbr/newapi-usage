@@ -1277,7 +1277,7 @@
         const s = c.sub2api || {};
         const accounts = s.accounts || [];
         const pill = `<span class="pill success">${fmt.format(s.total || accounts.length || 0)} 账号</span>`;
-        const foot = `<div class="pool-foot"><span>更新于 ${tsToText(c.updated_at)}</span><span>已使用%</span></div>`;
+        const foot = `<div class="pool-foot"><span>更新于 ${tsToText(c.updated_at)}</span><span>剩余%</span></div>`;
         const list = accounts.length
           ? `<div class="sub2-list">${accounts.map(sub2AccountHTML).join("")}</div>`
           : `<div class="muted">没有账号</div>`;
@@ -1325,11 +1325,12 @@
 
       function sub2UsagePillHTML(win) {
         const used = Number(win.used_percent || 0);
-        const cls = used >= 90 ? "error" : used >= 70 ? "warn" : "success";
+        const remaining = Number.isFinite(Number(win.remaining_percent)) ? Number(win.remaining_percent) : Math.max(0, 100 - used);
+        const cls = remaining <= 10 ? "error" : remaining <= 30 ? "warn" : "success";
         const reset = win.resets_at ? ` · reset ${shortTime(win.resets_at)}` : "";
         const stats = win.tokens ? ` · ${fmt.format(win.tokens)} tokens` : "";
         const source = win.source === "live" ? "实时" : "预估";
-        return `<span class="pill ${cls}" title="${escapeHtml(source + reset + stats)}">${escapeHtml(win.name || source)} ${formatPercent(used)}</span>`;
+        return `<span class="pill ${cls}" title="${escapeHtml(`${source} · 已用 ${formatPercent(used)}${reset}${stats}`)}">${escapeHtml(win.name || source)} ${formatPercent(remaining)}</span>`;
       }
 
       function attachSub2APIHandlers() {

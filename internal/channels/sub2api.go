@@ -263,19 +263,23 @@ func usageWindowsFromAccount(raw sub2AccountRaw) []Sub2APIUsageWindow {
 		return windows
 	}
 	if value, ok := raw.Extra["session_window_utilization"]; ok {
+		used := normalizeUsedPercent(asFloat(value))
 		windows = append(windows, Sub2APIUsageWindow{
-			Name:        "5h 预估",
-			Source:      "estimated",
-			UsedPercent: normalizeUsedPercent(asFloat(value)),
-			ResetsAt:    raw.SessionWindowEnd,
+			Name:             "5h 预估",
+			Source:           "estimated",
+			UsedPercent:      used,
+			RemainingPercent: remainingPercent(used),
+			ResetsAt:         raw.SessionWindowEnd,
 		})
 	}
 	if value, ok := raw.Extra["passive_usage_7d_utilization"]; ok {
+		used := normalizeUsedPercent(asFloat(value))
 		windows = append(windows, Sub2APIUsageWindow{
-			Name:        "7d 预估",
-			Source:      "estimated",
-			UsedPercent: normalizeUsedPercent(asFloat(value)),
-			ResetsAt:    unixLikeTime(raw.Extra["passive_usage_7d_reset"]),
+			Name:             "7d 预估",
+			Source:           "estimated",
+			UsedPercent:      used,
+			RemainingPercent: remainingPercent(used),
+			ResetsAt:         unixLikeTime(raw.Extra["passive_usage_7d_reset"]),
 		})
 	}
 	return windows
@@ -301,6 +305,7 @@ func liveWindow(name string, raw sub2UsageWindowRaw) (Sub2APIUsageWindow, bool) 
 		Name:             name,
 		Source:           "live",
 		UsedPercent:      used,
+		RemainingPercent: remainingPercent(used),
 		ResetsAt:         raw.ResetsAt,
 		RemainingSeconds: raw.RemainingSeconds,
 		Requests:         raw.WindowStats.Requests,
@@ -332,6 +337,17 @@ func normalizeUsedPercent(value float64) float64 {
 		return 100
 	}
 	return value
+}
+
+func remainingPercent(used float64) float64 {
+	remaining := 100 - used
+	if remaining < 0 {
+		return 0
+	}
+	if remaining > 100 {
+		return 100
+	}
+	return remaining
 }
 
 func asFloat(value any) float64 {
