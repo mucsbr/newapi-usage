@@ -52,6 +52,14 @@ type Config struct {
 	CPAProbeTimeout     time.Duration
 	CPARefreshInterval  time.Duration
 	CPAMaxAccounts      int
+
+	// Sub2API account balance.
+	Sub2APIBaseURL  string
+	Sub2APIKey      string
+	Sub2APILabel    string
+	Sub2APITimezone string
+	Sub2APITimeout  time.Duration
+	Sub2APIPageSize int
 }
 
 func Load() (Config, error) {
@@ -84,6 +92,13 @@ func Load() (Config, error) {
 		CPAProbeTimeout:     time.Duration(getEnvInt("CPA_PROBE_TIMEOUT_SECONDS", 15)) * time.Second,
 		CPARefreshInterval:  time.Duration(getEnvInt("CPA_REFRESH_INTERVAL_SECONDS", 300)) * time.Second,
 		CPAMaxAccounts:      getEnvInt("CPA_MAX_ACCOUNTS", 0),
+
+		Sub2APIBaseURL:  getEnv("SUB2API_BASE_URL", ""),
+		Sub2APIKey:      firstEnv("SUB2API_API_KEY", "SUB2API_ADMIN_KEY"),
+		Sub2APILabel:    getEnv("SUB2API_LABEL", "Sub2API"),
+		Sub2APITimezone: getEnv("SUB2API_TIMEZONE", "Asia/Shanghai"),
+		Sub2APITimeout:  time.Duration(getEnvInt("SUB2API_TIMEOUT_SECONDS", 15)) * time.Second,
+		Sub2APIPageSize: getEnvInt("SUB2API_PAGE_SIZE", 50),
 	}
 	if cfg.SQLDSN == "" {
 		return Config{}, fmt.Errorf("SQL_DSN is required")
@@ -149,6 +164,22 @@ func Load() (Config, error) {
 	if cfg.CPAMaxAccounts < 0 {
 		cfg.CPAMaxAccounts = 0
 	}
+	cfg.Sub2APIBaseURL = strings.TrimRight(strings.TrimSpace(cfg.Sub2APIBaseURL), "/")
+	if strings.TrimSpace(cfg.Sub2APILabel) == "" {
+		cfg.Sub2APILabel = "Sub2API"
+	}
+	if strings.TrimSpace(cfg.Sub2APITimezone) == "" {
+		cfg.Sub2APITimezone = "Asia/Shanghai"
+	}
+	if cfg.Sub2APITimeout <= 0 {
+		cfg.Sub2APITimeout = 15 * time.Second
+	}
+	if cfg.Sub2APIPageSize <= 0 {
+		cfg.Sub2APIPageSize = 50
+	}
+	if cfg.Sub2APIPageSize > 500 {
+		cfg.Sub2APIPageSize = 500
+	}
 
 	return cfg, nil
 }
@@ -163,9 +194,13 @@ func (c Config) CPAEnabled() bool {
 	return strings.TrimSpace(c.CPABaseURL) != "" && strings.TrimSpace(c.CPAToken) != ""
 }
 
+func (c Config) Sub2APIEnabled() bool {
+	return strings.TrimSpace(c.Sub2APIBaseURL) != "" && strings.TrimSpace(c.Sub2APIKey) != ""
+}
+
 // ChannelsEnabled reports whether the channel balance feature is active at all.
 func (c Config) ChannelsEnabled() bool {
-	return c.DeepSeekEnabled() || c.CPAEnabled()
+	return c.DeepSeekEnabled() || c.CPAEnabled() || c.Sub2APIEnabled()
 }
 
 func (c Config) Addr() string {

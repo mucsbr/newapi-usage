@@ -2,15 +2,19 @@ package channels
 
 import (
 	"context"
+	"errors"
 
 	"github.com/mucsbr/newapi-usage/internal/config"
 )
+
+var errSub2APINotConfigured = errors.New("sub2api is not configured")
 
 // Manager owns the channel balance providers. DeepSeek is fetched live (cheap),
 // while CPA runs a background refresh and is read from cache.
 type Manager struct {
 	deepseek *deepSeekProvider
 	cpa      *cpaProvider
+	sub2api  *sub2APIProvider
 }
 
 // New builds a Manager from config. It returns a non-nil Manager even when no
@@ -33,12 +37,22 @@ func New(cfg config.Config) *Manager {
 			MaxAccounts:     cfg.CPAMaxAccounts,
 		})
 	}
+	if cfg.Sub2APIEnabled() {
+		m.sub2api = newSub2API(sub2APIConfig{
+			Label:    cfg.Sub2APILabel,
+			BaseURL:  cfg.Sub2APIBaseURL,
+			APIKey:   cfg.Sub2APIKey,
+			Timezone: cfg.Sub2APITimezone,
+			Timeout:  cfg.Sub2APITimeout,
+			PageSize: cfg.Sub2APIPageSize,
+		})
+	}
 	return m
 }
 
 // Enabled reports whether any channel is configured.
 func (m *Manager) Enabled() bool {
-	return m != nil && (m.deepseek != nil || m.cpa != nil)
+	return m != nil && (m.deepseek != nil || m.cpa != nil || m.sub2api != nil)
 }
 
 // Start launches background refresh for providers that need it (CPA).
@@ -63,12 +77,22 @@ func (m *Manager) Snapshot(ctx context.Context) []Balance {
 	if m == nil {
 		return []Balance{}
 	}
-	out := make([]Balance, 0, 2)
+	out := make([]Balance, 0, 3)
 	if m.deepseek != nil {
 		out = append(out, m.deepseek.Balance(ctx))
 	}
 	if m.cpa != nil {
 		out = append(out, m.cpa.Snapshot())
 	}
+	if m.sub2api != nil {
+		out = append(out, m.sub2api.Balance(ctx))
+	}
 	return out
+}
+
+func (m *Manager) Sub2APIUsage(ctx context.Context, accountID int64, force bool, timezone string) (Sub2APIUsage, error) {
+	if m == nil || m.sub2api == nil {
+		return Sub2APIUsage{}, errSub2APINotConfigured
+	}
+	return m.sub2api.FetchUsage(ctx, accountID, force, timezone)
 }

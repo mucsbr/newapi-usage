@@ -4,6 +4,7 @@ package channels
 const (
 	KindCurrency = "currency" // DeepSeek-style monetary balance.
 	KindPool     = "pool"     // CPA-style account pool with quota usage.
+	KindSub2API  = "sub2api"  // Sub2API account list with estimated/live usage.
 )
 
 // Balance is one channel card in the "渠道余额" area.
@@ -25,6 +26,9 @@ type Balance struct {
 
 	// Pool channels (CPA).
 	Pool *PoolSummary `json:"pool,omitempty"`
+
+	// Sub2API account channel.
+	Sub2API *Sub2APISummary `json:"sub2api,omitempty"`
 }
 
 // CurrencyBalance mirrors one entry of DeepSeek's balance_infos array. Amounts
@@ -58,4 +62,50 @@ type PoolAccount struct {
 type WindowUsage struct {
 	UsedPercent float64 `json:"used_percent"`
 	Remaining   float64 `json:"remaining_percent"`
+}
+
+// Sub2APISummary lists Sub2API accounts. OAuth accounts can be refreshed
+// individually for live usage, while API-key accounts only expose list metadata.
+type Sub2APISummary struct {
+	Total    int              `json:"total"`
+	Accounts []Sub2APIAccount `json:"accounts"`
+}
+
+type Sub2APIAccount struct {
+	ID                 int64                `json:"id"`
+	Name               string               `json:"name"`
+	Email              string               `json:"email,omitempty"`
+	Platform           string               `json:"platform"`
+	Type               string               `json:"type"`
+	Status             string               `json:"status"`
+	ErrorMessage       string               `json:"error_message,omitempty"`
+	Schedulable        bool                 `json:"schedulable"`
+	CurrentConcurrency int                  `json:"current_concurrency"`
+	Concurrency        int                  `json:"concurrency"`
+	Groups             []string             `json:"groups,omitempty"`
+	ProxyName          string               `json:"proxy_name,omitempty"`
+	LastUsedAt         string               `json:"last_used_at,omitempty"`
+	UpdatedAt          string               `json:"updated_at,omitempty"`
+	SessionStatus      string               `json:"session_window_status,omitempty"`
+	SessionWindowStart string               `json:"session_window_start,omitempty"`
+	SessionWindowEnd   string               `json:"session_window_end,omitempty"`
+	CanRefreshUsage    bool                 `json:"can_refresh_usage"`
+	UsageWindows       []Sub2APIUsageWindow `json:"usage_windows,omitempty"`
+}
+
+type Sub2APIUsage struct {
+	AccountID int64                `json:"account_id"`
+	UpdatedAt string               `json:"updated_at,omitempty"`
+	Windows   []Sub2APIUsageWindow `json:"windows"`
+}
+
+type Sub2APIUsageWindow struct {
+	Name             string  `json:"name"`
+	Source           string  `json:"source"`
+	UsedPercent      float64 `json:"used_percent"`
+	ResetsAt         string  `json:"resets_at,omitempty"`
+	RemainingSeconds int64   `json:"remaining_seconds,omitempty"`
+	Requests         int64   `json:"requests,omitempty"`
+	Tokens           int64   `json:"tokens,omitempty"`
+	Cost             float64 `json:"cost,omitempty"`
 }

@@ -136,6 +136,22 @@ If the JSONL has no timestamp field, the service can still show same-token candi
 
 Only request bodies are shown. Model response text is not available unless the OpenResty audit layer also records response bodies.
 
+## Channel Balance Cards
+
+Optional cards can be shown in the "渠道余额" area. Configure only the providers you need.
+
+Sub2API account card:
+
+```env
+SUB2API_BASE_URL=http://10.255.200.17:6780
+SUB2API_API_KEY=admin-xxxxxxxxxxxxxxxx
+SUB2API_LABEL=Sub2API
+SUB2API_TIMEZONE=Asia/Shanghai
+SUB2API_PAGE_SIZE=50
+```
+
+The card lists accounts from `/api/v1/admin/accounts`. If account-list metadata includes usage fields, those are shown as estimated used percentages. OAuth accounts also show a live refresh button that calls `/api/v1/admin/accounts/{id}/usage`.
+
 ## API
 
 ```text
@@ -146,6 +162,8 @@ GET /api/keys/{token_id}/models
 GET /api/logs?token_id=123&type=success&page=1&page_size=100
 GET /api/logs/{log_id}/audit
 GET /api/audit/status
+GET /api/channels/balance
+GET /api/channels/sub2api/accounts/{account_id}/usage?force=true&timezone=Asia/Shanghai
 ```
 
 Time parameters are Unix timestamps in seconds.
