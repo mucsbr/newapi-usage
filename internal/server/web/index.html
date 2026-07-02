@@ -438,19 +438,16 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 10px;
-        font-size: 12px;
+        gap: 6px;
+        min-width: 0;
+        font-size: 11px;
       }
 
       .sub2-account-title {
         display: block;
+        flex: 1 1 auto;
+        min-width: 0;
         font-weight: 650;
-      }
-
-      .sub2-account-kind {
-        margin-left: 4px;
-        color: var(--muted);
-        font-weight: 400;
       }
 
       .sub2-meta,
@@ -458,26 +455,45 @@
       .sub2-usage {
         display: flex;
         align-items: center;
-        gap: 6px;
+        gap: 4px;
       }
 
       .sub2-right,
       .sub2-usage {
-        flex-shrink: 0;
+        min-width: 0;
         white-space: nowrap;
+      }
+
+      .sub2-right {
+        flex: 0 1 auto;
+        justify-content: flex-end;
+      }
+
+      .sub2-usage {
+        flex: 0 1 auto;
+      }
+
+      .sub2-usage .pill {
+        height: 18px;
+        padding: 0 5px;
+        font-size: 10px;
       }
 
       .sub2-refresh {
         display: inline-flex;
         align-items: center;
-        gap: 6px;
+        justify-content: center;
+        width: 22px;
+        height: 20px;
+        padding: 0;
+        gap: 0;
         flex-shrink: 0;
       }
 
       .refresh-icon {
-        width: 13px;
-        height: 13px;
-        border: 2px solid currentColor;
+        width: 11px;
+        height: 11px;
+        border: 1.5px solid currentColor;
         border-right-color: transparent;
         border-radius: 50%;
         display: inline-block;
@@ -1300,13 +1316,12 @@
           .join(" · ");
         const usage = sub2UsageHTML(a.usage_windows || []);
         const refresh = a.can_refresh_usage
-          ? `<button class="secondary small sub2-refresh" type="button" data-account-id="${a.id}" title="获取实时额度"><span class="refresh-icon" aria-hidden="true"></span>实时</button>`
+          ? `<button class="secondary small sub2-refresh" type="button" data-account-id="${a.id}" title="获取实时额度"><span class="refresh-icon" aria-hidden="true"></span></button>`
           : "";
         return `
           <div class="sub2-account" data-sub2-account-id="${a.id}" title="${escapeHtml(details)}">
             <span class="sub2-account-title">
               ${escapeHtml(title)}
-              <span class="sub2-account-kind">${escapeHtml(a.type || "-")}</span>
             </span>
             <div class="sub2-right">
               <span class="sub2-usage" data-sub2-usage="${a.id}">${usage}</span>
@@ -1330,7 +1345,15 @@
         const reset = win.resets_at ? ` · reset ${shortTime(win.resets_at)}` : "";
         const stats = win.tokens ? ` · ${fmt.format(win.tokens)} tokens` : "";
         const source = win.source === "live" ? "实时" : "预估";
-        return `<span class="pill ${cls}" title="${escapeHtml(`${source} · 已用 ${formatPercent(used)}${reset}${stats}`)}">${escapeHtml(win.name || source)} ${formatPercent(remaining)}</span>`;
+        return `<span class="pill ${cls}" title="${escapeHtml(`${win.name || source} · ${source} · 已用 ${formatPercent(used)}${reset}${stats}`)}">${escapeHtml(compactUsageName(win.name || source))} ${formatPercent(remaining)}</span>`;
+      }
+
+      function compactUsageName(name) {
+        const text = String(name || "");
+        if (text.toLowerCase().includes("5h")) return "5h";
+        if (text.toLowerCase().includes("7d")) return "7d";
+        if (text.includes("周")) return "周";
+        return text.replace("预估", "").replace("实时", "").trim() || "额度";
       }
 
       function attachSub2APIHandlers() {
