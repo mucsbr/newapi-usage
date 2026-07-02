@@ -60,6 +60,14 @@ type Config struct {
 	Sub2APITimezone string
 	Sub2APITimeout  time.Duration
 	Sub2APIPageSize int
+
+	// Ikun quota enrichment for the matching Sub2API account.
+	IkunAPIBase           string
+	IkunAccessToken       string
+	IkunUserID            int64
+	IkunSub2APIAccountID  int64
+	IkunSub2APIAccountKey string
+	IkunLabel             string
 }
 
 func Load() (Config, error) {
@@ -99,6 +107,13 @@ func Load() (Config, error) {
 		Sub2APITimezone: getEnv("SUB2API_TIMEZONE", "Asia/Shanghai"),
 		Sub2APITimeout:  time.Duration(getEnvInt("SUB2API_TIMEOUT_SECONDS", 15)) * time.Second,
 		Sub2APIPageSize: getEnvInt("SUB2API_PAGE_SIZE", 50),
+
+		IkunAPIBase:           getEnv("IKUN_API_BASE", "https://api.ikuncode.cc"),
+		IkunAccessToken:       firstEnv("IKUN_ACCESS_TOKEN", "IKUN_API_KEY"),
+		IkunUserID:            getEnvInt64("IKUN_USER_ID", 0),
+		IkunSub2APIAccountID:  getEnvInt64("IKUN_SUB2API_ACCOUNT_ID", 0),
+		IkunSub2APIAccountKey: getEnv("IKUN_SUB2API_ACCOUNT_KEY", "ikun"),
+		IkunLabel:             getEnv("IKUN_LABEL", "Ikun"),
 	}
 	if cfg.SQLDSN == "" {
 		return Config{}, fmt.Errorf("SQL_DSN is required")
@@ -180,6 +195,16 @@ func Load() (Config, error) {
 	if cfg.Sub2APIPageSize > 500 {
 		cfg.Sub2APIPageSize = 500
 	}
+	cfg.IkunAPIBase = strings.TrimRight(strings.TrimSpace(cfg.IkunAPIBase), "/")
+	if cfg.IkunAPIBase == "" {
+		cfg.IkunAPIBase = "https://api.ikuncode.cc"
+	}
+	if strings.TrimSpace(cfg.IkunSub2APIAccountKey) == "" {
+		cfg.IkunSub2APIAccountKey = "ikun"
+	}
+	if strings.TrimSpace(cfg.IkunLabel) == "" {
+		cfg.IkunLabel = "Ikun"
+	}
 
 	return cfg, nil
 }
@@ -196,6 +221,10 @@ func (c Config) CPAEnabled() bool {
 
 func (c Config) Sub2APIEnabled() bool {
 	return strings.TrimSpace(c.Sub2APIBaseURL) != "" && strings.TrimSpace(c.Sub2APIKey) != ""
+}
+
+func (c Config) IkunEnabled() bool {
+	return strings.TrimSpace(c.IkunAccessToken) != "" && c.IkunUserID > 0
 }
 
 // ChannelsEnabled reports whether the channel balance feature is active at all.
@@ -272,6 +301,18 @@ func getEnvInt(key string, fallback int) int {
 		return fallback
 	}
 	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func getEnvInt64(key string, fallback int64) int64 {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
 	if err != nil {
 		return fallback
 	}

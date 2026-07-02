@@ -148,9 +148,15 @@ SUB2API_API_KEY=admin-xxxxxxxxxxxxxxxx
 SUB2API_LABEL=Sub2API
 SUB2API_TIMEZONE=Asia/Shanghai
 SUB2API_PAGE_SIZE=50
+IKUN_API_BASE=https://api.ikuncode.cc
+IKUN_ACCESS_TOKEN=your-ikun-access-token
+IKUN_USER_ID=20378
+IKUN_SUB2API_ACCOUNT_ID=275
+IKUN_SUB2API_ACCOUNT_KEY=ikun
 ```
 
 The card lists accounts from `/api/v1/admin/accounts`. If account-list metadata includes usage fields, those are shown as estimated remaining percentages. OAuth accounts also show a live refresh button that calls `/api/v1/admin/accounts/{id}/usage`.
+When Ikun access is configured, the matching Sub2API account is enriched from `/api/user/self`: `quota` is shown as remaining balance, `used_quota` as used amount, and both quota fields are converted to CNY by dividing by `500000` and formatting to two decimals.
 
 ## API
 

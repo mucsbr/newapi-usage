@@ -19,6 +19,7 @@ type sub2APIProvider struct {
 	timezone string
 	pageSize int
 	client   *http.Client
+	ikun     *ikunProvider
 }
 
 type sub2APIConfig struct {
@@ -28,6 +29,7 @@ type sub2APIConfig struct {
 	Timezone string
 	Timeout  time.Duration
 	PageSize int
+	Ikun     ikunConfig
 }
 
 func newSub2API(cfg sub2APIConfig) *sub2APIProvider {
@@ -46,6 +48,10 @@ func newSub2API(cfg sub2APIConfig) *sub2APIProvider {
 	if timezone == "" {
 		timezone = "Asia/Shanghai"
 	}
+	var ikun *ikunProvider
+	if cfg.Ikun.Enabled() {
+		ikun = newIkun(cfg.Ikun, timeout)
+	}
 	return &sub2APIProvider{
 		label:    cfg.Label,
 		baseURL:  strings.TrimRight(cfg.BaseURL, "/"),
@@ -53,6 +59,7 @@ func newSub2API(cfg sub2APIConfig) *sub2APIProvider {
 		timezone: timezone,
 		pageSize: pageSize,
 		client:   &http.Client{Timeout: timeout},
+		ikun:     ikun,
 	}
 }
 
@@ -131,14 +138,41 @@ func (s *sub2APIProvider) fetchAccounts(ctx context.Context) ([]Sub2APIAccount, 
 		return nil, 0, fmt.Errorf("accounts code %d: %s", envelope.Code, envelope.Message)
 	}
 	items := make([]Sub2APIAccount, 0, len(envelope.Data.Items))
+	var ikunQuota *Sub2APIAccountQuota
+	var ikunFetched bool
 	for _, item := range envelope.Data.Items {
-		items = append(items, accountFromSub2Raw(item))
+		account := accountFromSub2Raw(item)
+		if s.ikun != nil && s.ikun.matchesSub2Account(item) {
+			if !ikunFetched {
+				ikunQuota = s.fetchIkunQuota(ctx)
+				ikunFetched = true
+			}
+			if ikunQuota != nil {
+				quota := *ikunQuota
+				account.ExternalQuota = &quota
+			}
+		}
+		items = append(items, account)
 	}
 	total := envelope.Data.Total
 	if total == 0 {
 		total = len(items)
 	}
 	return items, total, nil
+}
+
+func (s *sub2APIProvider) fetchIkunQuota(ctx context.Context) *Sub2APIAccountQuota {
+	quota, err := s.ikun.Quota(ctx)
+	if err != nil {
+		return &Sub2APIAccountQuota{
+			Source:    "ikun",
+			Label:     s.ikun.label,
+			UserID:    s.ikun.userID,
+			UpdatedAt: time.Now().Unix(),
+			Error:     err.Error(),
+		}
+	}
+	return &quota
 }
 
 func (s *sub2APIProvider) getJSON(ctx context.Context, endpoint string) ([]byte, error) {

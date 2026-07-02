@@ -45,6 +45,14 @@ func New(cfg config.Config) *Manager {
 			Timezone: cfg.Sub2APITimezone,
 			Timeout:  cfg.Sub2APITimeout,
 			PageSize: cfg.Sub2APIPageSize,
+			Ikun: ikunConfig{
+				Label:             cfg.IkunLabel,
+				BaseURL:           cfg.IkunAPIBase,
+				AccessToken:       cfg.IkunAccessToken,
+				UserID:            cfg.IkunUserID,
+				Sub2APIAccountID:  cfg.IkunSub2APIAccountID,
+				Sub2APIAccountKey: cfg.IkunSub2APIAccountKey,
+			},
 		})
 	}
 	return m

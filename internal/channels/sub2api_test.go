@@ -68,3 +68,35 @@ func TestSub2APILiveUsage(t *testing.T) {
 		t.Fatalf("unexpected seven-day usage: %+v", windows[1])
 	}
 }
+
+func TestIkunQuotaToCNY(t *testing.T) {
+	if got := quotaToCNY(245047897); got != 490.1 {
+		t.Fatalf("quota cny = %v", got)
+	}
+	if got := quotaToCNY(1204898553); got != 2409.8 {
+		t.Fatalf("used cny = %v", got)
+	}
+}
+
+func TestIkunMatchesSub2Account(t *testing.T) {
+	provider := newIkun(ikunConfig{
+		Label:       "Ikun",
+		BaseURL:     "https://api.ikuncode.cc",
+		AccessToken: "token",
+		UserID:      20378,
+	}, 0)
+
+	if !provider.matchesSub2Account(sub2AccountRaw{
+		ID:   275,
+		Name: "ikun",
+	}) {
+		t.Fatalf("expected name match")
+	}
+	if !provider.matchesSub2Account(sub2AccountRaw{
+		ID:          123,
+		Name:        "other",
+		Credentials: map[string]any{"base_url": "https://api.ikuncode.cc/"},
+	}) {
+		t.Fatalf("expected base_url match")
+	}
+}

@@ -91,6 +91,7 @@ type Sub2APIAccount struct {
 	SessionWindowEnd   string               `json:"session_window_end,omitempty"`
 	CanRefreshUsage    bool                 `json:"can_refresh_usage"`
 	UsageWindows       []Sub2APIUsageWindow `json:"usage_windows,omitempty"`
+	ExternalQuota      *Sub2APIAccountQuota `json:"external_quota,omitempty"`
 }
 
 type Sub2APIUsage struct {
@@ -109,4 +110,18 @@ type Sub2APIUsageWindow struct {
 	Requests         int64   `json:"requests,omitempty"`
 	Tokens           int64   `json:"tokens,omitempty"`
 	Cost             float64 `json:"cost,omitempty"`
+}
+
+type Sub2APIAccountQuota struct {
+	Source       string  `json:"source"`
+	Label        string  `json:"label"`
+	UserID       int64   `json:"user_id,omitempty"`
+	Username     string  `json:"username,omitempty"`
+	Quota        int64   `json:"quota"`
+	UsedQuota    int64   `json:"used_quota"`
+	BalanceCNY   float64 `json:"balance_cny"`
+	UsedCNY      float64 `json:"used_cny"`
+	RequestCount int64   `json:"request_count"`
+	UpdatedAt    int64   `json:"updated_at"`
+	Error        string  `json:"error,omitempty"`
 }

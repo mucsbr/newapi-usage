@@ -53,6 +53,13 @@ services:
       - SUB2API_TIMEZONE=${SUB2API_TIMEZONE:-Asia/Shanghai}
       - SUB2API_TIMEOUT_SECONDS=${SUB2API_TIMEOUT_SECONDS:-15}
       - SUB2API_PAGE_SIZE=${SUB2API_PAGE_SIZE:-50}
+      - IKUN_API_BASE=${IKUN_API_BASE:-https://api.ikuncode.cc}
+      - IKUN_ACCESS_TOKEN=${IKUN_ACCESS_TOKEN:-}
+      - IKUN_API_KEY=${IKUN_API_KEY:-}
+      - IKUN_USER_ID=${IKUN_USER_ID:-0}
+      - IKUN_SUB2API_ACCOUNT_ID=${IKUN_SUB2API_ACCOUNT_ID:-0}
+      - IKUN_SUB2API_ACCOUNT_KEY=${IKUN_SUB2API_ACCOUNT_KEY:-ikun}
+      - IKUN_LABEL=${IKUN_LABEL:-Ikun}
       - TZ=${TZ:-Asia/Shanghai}
     volumes:
       # Mount the SQLite database here only if SQL_DSN points to /data/*.db.

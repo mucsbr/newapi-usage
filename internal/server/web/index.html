@@ -452,28 +452,38 @@
 
       .sub2-meta,
       .sub2-right,
-      .sub2-usage {
+      .sub2-usage,
+      .sub2-quota {
         display: flex;
         align-items: center;
         gap: 4px;
       }
 
       .sub2-right,
-      .sub2-usage {
+      .sub2-usage,
+      .sub2-quota {
         min-width: 0;
-        white-space: nowrap;
       }
 
       .sub2-right {
         flex: 0 1 auto;
         justify-content: flex-end;
+        flex-wrap: wrap;
       }
 
       .sub2-usage {
         flex: 0 1 auto;
+        white-space: nowrap;
       }
 
-      .sub2-usage .pill {
+      .sub2-quota {
+        flex: 0 1 auto;
+        justify-content: flex-end;
+        white-space: nowrap;
+      }
+
+      .sub2-usage .pill,
+      .sub2-quota .pill {
         height: 18px;
         padding: 0 5px;
         font-size: 10px;
@@ -1314,7 +1324,8 @@
         ]
           .filter(Boolean)
           .join(" · ");
-        const usage = sub2UsageHTML(a.usage_windows || []);
+        const quota = sub2ExternalQuotaHTML(a.external_quota);
+        const usage = sub2UsageHTML(a.usage_windows || [], Boolean(quota));
         const refresh = a.can_refresh_usage
           ? `<button class="secondary small sub2-refresh" type="button" data-account-id="${a.id}" title="获取实时额度"><span class="refresh-icon" aria-hidden="true"></span></button>`
           : "";
@@ -1324,6 +1335,7 @@
               ${escapeHtml(title)}
             </span>
             <div class="sub2-right">
+              ${quota}
               <span class="sub2-usage" data-sub2-usage="${a.id}">${usage}</span>
               ${refresh}
             </div>
@@ -1331,9 +1343,27 @@
         `;
       }
 
-      function sub2UsageHTML(windows) {
+      function sub2ExternalQuotaHTML(quota) {
+        if (!quota) return "";
+        if (quota.error && quota.quota === 0 && quota.used_quota === 0 && quota.request_count === 0) {
+          return `<span class="sub2-quota"><span class="pill error" title="${escapeHtml(quota.error)}">${escapeHtml(quota.label || "Ikun")}异常</span></span>`;
+        }
+        const label = quota.label || "Ikun";
+        const stale = quota.error ? ` · ${quota.error}` : "";
+        const title = `${label}${quota.username ? ` · ${quota.username}` : ""}${quota.user_id ? ` #${quota.user_id}` : ""} · 余额 ${formatMoney(quota.balance_cny)} · 已用 ${formatMoney(quota.used_cny)} · ${fmt.format(quota.request_count || 0)} 次${stale}`;
+        const cls = quota.error ? "warn" : Number(quota.balance_cny || 0) <= 0 ? "error" : "success";
+        return `
+          <span class="sub2-quota" title="${escapeHtml(title)}">
+            <span class="pill ${cls}">余 ${formatMoney(quota.balance_cny)}</span>
+            <span class="pill">用 ${formatMoney(quota.used_cny)}</span>
+            <span class="pill">${fmt.format(quota.request_count || 0)}次</span>
+          </span>
+        `;
+      }
+
+      function sub2UsageHTML(windows, hasExternalQuota = false) {
         if (!windows.length) {
-          return `<span class="pill">无额度数据</span>`;
+          return hasExternalQuota ? "" : `<span class="pill">无额度数据</span>`;
         }
         return windows.map(sub2UsagePillHTML).join("");
       }
@@ -1376,12 +1406,16 @@
           const data = await api(`/api/channels/sub2api/accounts/${accountId}/usage`, params);
           const target = document.querySelector(`[data-sub2-usage="${accountId}"]`);
           if (target) {
-            target.innerHTML = sub2UsageHTML(data.windows || []);
+            target.innerHTML = sub2UsageHTML(data.windows || [], Boolean(target.parentElement?.querySelector(".sub2-quota")));
           }
         } finally {
           button.disabled = false;
           button.classList.remove("loading");
         }
+      }
+
+      function formatMoney(value) {
+        return `¥${Number(value || 0).toFixed(2)}`;
       }
 
       function formatPercent(value) {
