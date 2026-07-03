@@ -5,6 +5,7 @@ const (
 	KindCurrency = "currency" // DeepSeek-style monetary balance.
 	KindPool     = "pool"     // CPA-style account pool with quota usage.
 	KindSub2API  = "sub2api"  // Sub2API account list with estimated/live usage.
+	KindXFYun    = "xfyun"    // XFYun MaaS coding-plan package and rate quotas.
 )
 
 // Balance is one channel card in the "渠道余额" area.
@@ -29,6 +30,9 @@ type Balance struct {
 
 	// Sub2API account channel.
 	Sub2API *Sub2APISummary `json:"sub2api,omitempty"`
+
+	// XFYun MaaS coding-plan channel.
+	XFYun *XFYunSummary `json:"xfyun,omitempty"`
 }
 
 // CurrencyBalance mirrors one entry of DeepSeek's balance_infos array. Amounts
@@ -124,4 +128,40 @@ type Sub2APIAccountQuota struct {
 	RequestCount int64   `json:"request_count"`
 	UpdatedAt    int64   `json:"updated_at"`
 	Error        string  `json:"error,omitempty"`
+}
+
+type XFYunSummary struct {
+	Total    int             `json:"total"`
+	Accounts []XFYunAccount `json:"accounts"`
+}
+
+type XFYunAccount struct {
+	ID               int64       `json:"id"`
+	Name             string      `json:"name"`
+	Status           string      `json:"status"`
+	Error            string      `json:"error,omitempty"`
+	CreatedAt        int64       `json:"created_at,omitempty"`
+	UpdatedAt        int64       `json:"updated_at,omitempty"`
+	SessionExpiresAt string      `json:"session_expires_at,omitempty"`
+	Plans            []XFYunPlan `json:"plans,omitempty"`
+}
+
+type XFYunPlan struct {
+	AppID     string            `json:"app_id"`
+	Name      string            `json:"name"`
+	Channel   string            `json:"channel"`
+	ValidFrom string            `json:"valid_from,omitempty"`
+	ExpiresAt string            `json:"expires_at,omitempty"`
+	Package   *XFYunUsageWindow `json:"package,omitempty"`
+	RP5H      *XFYunUsageWindow `json:"rp5h,omitempty"`
+	RPW       *XFYunUsageWindow `json:"rpw,omitempty"`
+	Daily     *XFYunUsageWindow `json:"daily,omitempty"`
+}
+
+type XFYunUsageWindow struct {
+	Limit            float64 `json:"limit"`
+	Usage            float64 `json:"usage"`
+	Left             float64 `json:"left"`
+	UsedPercent      float64 `json:"used_percent"`
+	RemainingPercent float64 `json:"remaining_percent"`
 }

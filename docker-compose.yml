@@ -60,6 +60,12 @@ services:
       - IKUN_SUB2API_ACCOUNT_ID=${IKUN_SUB2API_ACCOUNT_ID:-0}
       - IKUN_SUB2API_ACCOUNT_KEY=${IKUN_SUB2API_ACCOUNT_KEY:-ikun}
       - IKUN_LABEL=${IKUN_LABEL:-Ikun}
+      - XFYUN_ENABLED=${XFYUN_ENABLED:-true}
+      - XFYUN_API_BASE=${XFYUN_API_BASE:-https://maas.xfyun.cn}
+      - XFYUN_LABEL=${XFYUN_LABEL:-讯飞 MaaS}
+      - XFYUN_ACCOUNTS_PATH=${XFYUN_ACCOUNTS_PATH:-/var/lib/newapi-usage/xfyun-accounts.json}
+      - XFYUN_TIMEOUT_SECONDS=${XFYUN_TIMEOUT_SECONDS:-15}
+      - XFYUN_PAGE_SIZE=${XFYUN_PAGE_SIZE:-20}
       - TZ=${TZ:-Asia/Shanghai}
     volumes:
       # Mount the SQLite database here only if SQL_DSN points to /data/*.db.

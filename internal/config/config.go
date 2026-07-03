@@ -68,6 +68,15 @@ type Config struct {
 	IkunSub2APIAccountID  int64
 	IkunSub2APIAccountKey string
 	IkunLabel             string
+
+	// XFYun MaaS coding-plan accounts. ssoSessionId values are managed in the UI
+	// and stored in XFYunAccountsPath.
+	XFYunEnabled      bool
+	XFYunAPIBase      string
+	XFYunLabel        string
+	XFYunAccountsPath string
+	XFYunTimeout      time.Duration
+	XFYunPageSize     int
 }
 
 func Load() (Config, error) {
@@ -114,6 +123,13 @@ func Load() (Config, error) {
 		IkunSub2APIAccountID:  getEnvInt64("IKUN_SUB2API_ACCOUNT_ID", 0),
 		IkunSub2APIAccountKey: getEnv("IKUN_SUB2API_ACCOUNT_KEY", "ikun"),
 		IkunLabel:             getEnv("IKUN_LABEL", "Ikun"),
+
+		XFYunEnabled:      getEnvBool("XFYUN_ENABLED", true),
+		XFYunAPIBase:      getEnv("XFYUN_API_BASE", "https://maas.xfyun.cn"),
+		XFYunLabel:        getEnv("XFYUN_LABEL", "讯飞 MaaS"),
+		XFYunAccountsPath: getEnv("XFYUN_ACCOUNTS_PATH", "/var/lib/newapi-usage/xfyun-accounts.json"),
+		XFYunTimeout:      time.Duration(getEnvInt("XFYUN_TIMEOUT_SECONDS", 15)) * time.Second,
+		XFYunPageSize:     getEnvInt("XFYUN_PAGE_SIZE", 20),
 	}
 	if cfg.SQLDSN == "" {
 		return Config{}, fmt.Errorf("SQL_DSN is required")
@@ -205,6 +221,25 @@ func Load() (Config, error) {
 	if strings.TrimSpace(cfg.IkunLabel) == "" {
 		cfg.IkunLabel = "Ikun"
 	}
+	cfg.XFYunAPIBase = strings.TrimRight(strings.TrimSpace(cfg.XFYunAPIBase), "/")
+	if cfg.XFYunAPIBase == "" {
+		cfg.XFYunAPIBase = "https://maas.xfyun.cn"
+	}
+	if strings.TrimSpace(cfg.XFYunLabel) == "" {
+		cfg.XFYunLabel = "讯飞 MaaS"
+	}
+	if strings.TrimSpace(cfg.XFYunAccountsPath) == "" {
+		cfg.XFYunAccountsPath = "/var/lib/newapi-usage/xfyun-accounts.json"
+	}
+	if cfg.XFYunTimeout <= 0 {
+		cfg.XFYunTimeout = 15 * time.Second
+	}
+	if cfg.XFYunPageSize <= 0 {
+		cfg.XFYunPageSize = 20
+	}
+	if cfg.XFYunPageSize > 100 {
+		cfg.XFYunPageSize = 100
+	}
 
 	return cfg, nil
 }
@@ -227,9 +262,13 @@ func (c Config) IkunEnabled() bool {
 	return strings.TrimSpace(c.IkunAccessToken) != "" && c.IkunUserID > 0
 }
 
+func (c Config) XFYunChannelEnabled() bool {
+	return c.XFYunEnabled
+}
+
 // ChannelsEnabled reports whether the channel balance feature is active at all.
 func (c Config) ChannelsEnabled() bool {
-	return c.DeepSeekEnabled() || c.CPAEnabled() || c.Sub2APIEnabled()
+	return c.DeepSeekEnabled() || c.CPAEnabled() || c.Sub2APIEnabled() || c.XFYunChannelEnabled()
 }
 
 func (c Config) Addr() string {

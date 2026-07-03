@@ -158,6 +158,18 @@ IKUN_SUB2API_ACCOUNT_KEY=ikun
 The card lists accounts from `/api/v1/admin/accounts`. If account-list metadata includes usage fields, those are shown as estimated remaining percentages. OAuth accounts also show a live refresh button that calls `/api/v1/admin/accounts/{id}/usage`.
 When Ikun access is configured, the matching Sub2API account is enriched from `/api/user/self`: `quota` is shown as remaining balance, `used_quota` as used amount, and both quota fields are converted to CNY by dividing by `500000` and formatting to two decimals.
 
+XFYun MaaS coding-plan card:
+
+```env
+XFYUN_ENABLED=true
+XFYUN_API_BASE=https://maas.xfyun.cn
+XFYUN_LABEL=讯飞 MaaS
+XFYUN_ACCOUNTS_PATH=/var/lib/newapi-usage/xfyun-accounts.json
+XFYUN_PAGE_SIZE=20
+```
+
+The card stores one `ssoSessionId` as one account in `XFYUN_ACCOUNTS_PATH` and never returns the raw cookie value to the browser. Use the card's add/update controls to create or refresh accounts. It reads `/api/v1/gpt-finetune/coding-plan/list` and displays package, 5-hour, weekly, and daily quotas as remaining percentages.
+
 ## API
 
 ```text
@@ -170,6 +182,9 @@ GET /api/logs/{log_id}/audit
 GET /api/audit/status
 GET /api/channels/balance
 GET /api/channels/sub2api/accounts/{account_id}/usage?force=true&timezone=Asia/Shanghai
+POST /api/channels/xfyun/accounts
+PUT /api/channels/xfyun/accounts/{account_id}
+DELETE /api/channels/xfyun/accounts/{account_id}
 ```
 
 Time parameters are Unix timestamps in seconds.

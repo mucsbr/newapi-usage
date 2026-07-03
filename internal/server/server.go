@@ -55,6 +55,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/audit/status", s.handleAuditStatus)
 	s.mux.HandleFunc("/api/channels/balance", s.handleChannelsBalance)
 	s.mux.HandleFunc("/api/channels/sub2api/accounts/", s.handleSub2APIUsage)
+	s.mux.HandleFunc("/api/channels/xfyun/accounts", s.handleXFYunAccounts)
+	s.mux.HandleFunc("/api/channels/xfyun/accounts/", s.handleXFYunAccount)
 	s.mux.HandleFunc("/api/keys/", s.handleKeySubroutes)
 }
 
@@ -310,6 +312,86 @@ func (s *Server) handleSub2APIUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, data)
+}
+
+type xfyunAccountRequest struct {
+	Name         *string `json:"name"`
+	SSOSessionID *string `json:"sso_session_id"`
+}
+
+func (s *Server) handleXFYunAccounts(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if s.channels == nil || !s.channels.Enabled() {
+		writeError(w, http.StatusNotFound, "channels not configured")
+		return
+	}
+	var req xfyunAccountRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.SSOSessionID == nil || strings.TrimSpace(*req.SSOSessionID) == "" {
+		writeError(w, http.StatusBadRequest, "ssoSessionId is required")
+		return
+	}
+	name := ""
+	if req.Name != nil {
+		name = *req.Name
+	}
+	data, err := s.channels.AddXFYunAccount(r.Context(), name, *req.SSOSessionID)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, data)
+}
+
+func (s *Server) handleXFYunAccount(w http.ResponseWriter, r *http.Request) {
+	if s.channels == nil || !s.channels.Enabled() {
+		writeError(w, http.StatusNotFound, "channels not configured")
+		return
+	}
+	trimmed := strings.TrimPrefix(r.URL.Path, "/api/channels/xfyun/accounts/")
+	parts := strings.Split(strings.Trim(trimmed, "/"), "/")
+	if len(parts) != 1 {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	accountID, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || accountID <= 0 {
+		writeError(w, http.StatusBadRequest, "invalid account id")
+		return
+	}
+
+	switch r.Method {
+	case http.MethodPut, http.MethodPatch:
+		var req xfyunAccountRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		if req.Name == nil && req.SSOSessionID == nil {
+			writeError(w, http.StatusBadRequest, "nothing to update")
+			return
+		}
+		data, err := s.channels.UpdateXFYunAccount(r.Context(), accountID, req.Name, req.SSOSessionID)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, data)
+	case http.MethodDelete:
+		if err := s.channels.DeleteXFYunAccount(accountID); err != nil {
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
 }
 
 func parseTimeRange(r *http.Request) store.TimeRange {

@@ -513,6 +513,96 @@
         animation: spin 0.8s linear infinite;
       }
 
+      .xfyun-form {
+        display: grid;
+        grid-template-columns: minmax(70px, 0.35fr) minmax(0, 1fr) auto;
+        gap: 6px;
+        border-top: 1px solid var(--line);
+        padding-top: 10px;
+      }
+
+      .xfyun-form input {
+        min-width: 0;
+        height: 30px;
+        font-size: 11px;
+        padding: 0 9px;
+      }
+
+      .xfyun-form button {
+        height: 30px;
+        padding: 0 10px;
+        font-size: 11px;
+      }
+
+      .xfyun-list {
+        display: grid;
+        gap: 8px;
+        max-height: 360px;
+        overflow: auto;
+        border-top: 1px solid var(--line);
+        padding-top: 10px;
+      }
+
+      .xfyun-account {
+        display: grid;
+        gap: 6px;
+        min-width: 0;
+      }
+
+      .xfyun-line,
+      .xfyun-plan,
+      .xfyun-plan-pills,
+      .xfyun-actions {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        min-width: 0;
+      }
+
+      .xfyun-line,
+      .xfyun-plan {
+        justify-content: space-between;
+      }
+
+      .xfyun-title,
+      .xfyun-plan-main {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        min-width: 0;
+      }
+
+      .xfyun-title {
+        font-size: 11px;
+        font-weight: 650;
+      }
+
+      .xfyun-plan-main {
+        color: var(--muted);
+        font-size: 10px;
+      }
+
+      .xfyun-plan-pills {
+        flex: 0 0 auto;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+
+      .xfyun-plan-pills .pill,
+      .xfyun-line .pill {
+        height: 18px;
+        padding: 0 5px;
+        font-size: 10px;
+      }
+
+      .xfyun-actions button {
+        width: 24px;
+        height: 20px;
+        padding: 0;
+        font-size: 12px;
+        justify-content: center;
+      }
+
       @keyframes spin {
         to {
           transform: rotate(360deg);
@@ -1143,18 +1233,35 @@
         return response.json();
       }
 
-      async function postJSON(path, body = {}) {
-        const response = await fetch(path, {
-          method: "POST",
+      async function sendJSON(path, method, body = undefined) {
+        const options = {
+          method,
           credentials: "same-origin",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
+        };
+        if (body !== undefined) {
+          options.body = JSON.stringify(body);
+        }
+        const response = await fetch(path, {
+          ...options,
         });
         if (!response.ok) {
           const data = await response.json().catch(() => ({}));
           throw new Error(data?.error?.message || response.statusText);
         }
         return response.json();
+      }
+
+      async function postJSON(path, body = {}) {
+        return sendJSON(path, "POST", body);
+      }
+
+      async function putJSON(path, body = {}) {
+        return sendJSON(path, "PUT", body);
+      }
+
+      async function deleteJSON(path) {
+        return sendJSON(path, "DELETE");
       }
 
       function showLogin(message = "") {
@@ -1202,6 +1309,7 @@
         el("channelsMeta").textContent = `${list.length} 渠道`;
         el("channelsGrid").innerHTML = list.map(channelCardHTML).join("");
         attachSub2APIHandlers();
+        attachXFYunHandlers();
         const refreshing = list.some((c) => !c.ok && c.error === "refreshing");
         if (refreshing && channelsRetry < 5) {
           channelsRetry += 1;
@@ -1213,11 +1321,12 @@
 
       function channelCardHTML(c) {
         if (c.kind === "sub2api") return sub2apiCardHTML(c);
+        if (c.kind === "xfyun") return xfyunCardHTML(c);
         return c.kind === "pool" ? poolCardHTML(c) : currencyCardHTML(c);
       }
 
       function cardShell(c, statusPill, bodyHTML) {
-        const kindBadge = c.kind === "sub2api" ? "Sub2API" : c.kind === "pool" ? "账号池" : "余额";
+        const kindBadge = c.kind === "sub2api" ? "Sub2API" : c.kind === "xfyun" ? "MaaS" : c.kind === "pool" ? "账号池" : "余额";
         return `
           <div class="channel-card">
             <div class="channel-card-head">
@@ -1414,8 +1523,152 @@
         }
       }
 
+      function xfyunCardHTML(c) {
+        if (!c.ok) {
+          return cardShell(c, `<span class="pill error">异常</span>`, `<div class="channel-error">${escapeHtml(c.error || "获取失败")}</div>${xfyunAddFormHTML()}`);
+        }
+        const s = c.xfyun || {};
+        const accounts = s.accounts || [];
+        const pill = `<span class="pill success">${fmt.format(s.total || accounts.length || 0)} 账号</span>`;
+        const foot = `<div class="pool-foot"><span>更新于 ${tsToText(c.updated_at)}</span><span>包 / 5h / 周 · 剩余%</span></div>`;
+        const list = accounts.length
+          ? `<div class="xfyun-list">${accounts.map(xfyunAccountHTML).join("")}</div>`
+          : `<div class="muted">还没有账号</div>`;
+        return cardShell(c, pill, foot + list + xfyunAddFormHTML());
+      }
+
+      function xfyunAddFormHTML() {
+        return `
+          <form class="xfyun-form" data-xfyun-add>
+            <input name="name" placeholder="名称" autocomplete="off" />
+            <input name="sso_session_id" placeholder="ssoSessionId / Cookie" autocomplete="off" />
+            <button type="submit">添加</button>
+          </form>
+        `;
+      }
+
+      function xfyunAccountHTML(a) {
+        const title = `${a.name || `账号 #${a.id}`}${a.session_expires_at ? ` · session ${shortTime(a.session_expires_at)}` : ""}`;
+        const status = xfyunStatusPill(a);
+        const plans = (a.plans || []).length
+          ? (a.plans || []).map(xfyunPlanHTML).join("")
+          : `<div class="xfyun-plan"><span class="xfyun-plan-main">${escapeHtml(a.error || "没有套餐数据")}</span></div>`;
+        return `
+          <div class="xfyun-account" data-xfyun-account-id="${a.id}">
+            <div class="xfyun-line" title="${escapeHtml(title)}">
+              <span class="xfyun-title">${escapeHtml(a.name || `账号 #${a.id}`)}</span>
+              <span class="xfyun-actions">
+                ${status}
+                <button class="secondary small xfyun-update" type="button" data-account-id="${a.id}" title="更新 ssoSessionId">↻</button>
+                <button class="secondary small xfyun-delete" type="button" data-account-id="${a.id}" title="删除账号">×</button>
+              </span>
+            </div>
+            ${plans}
+          </div>
+        `;
+      }
+
+      function xfyunStatusPill(a) {
+        if (a.status === "ok") return `<span class="pill success">正常</span>`;
+        if (a.status === "expired") return `<span class="pill error" title="${escapeHtml(a.error || "用户未登录")}">过期</span>`;
+        return `<span class="pill warn" title="${escapeHtml(a.error || "获取失败")}">异常</span>`;
+      }
+
+      function xfyunPlanHTML(plan) {
+        const name = [plan.name || plan.app_id || "套餐", plan.channel || ""].filter(Boolean).join(" · ");
+        const expires = plan.expires_at ? ` · 到期 ${shortTime(plan.expires_at)}` : "";
+        const title = `${name}${expires}`;
+        return `
+          <div class="xfyun-plan" title="${escapeHtml(title)}">
+            <span class="xfyun-plan-main">${escapeHtml(name)}</span>
+            <span class="xfyun-plan-pills">
+              ${xfyunUsagePill("包", plan.package)}
+              ${xfyunUsagePill("5h", plan.rp5h)}
+              ${xfyunUsagePill("周", plan.rpw)}
+              ${xfyunUsagePill("日", plan.daily)}
+            </span>
+          </div>
+        `;
+      }
+
+      function xfyunUsagePill(label, usage) {
+        if (!usage) return "";
+        const remaining = Number(usage.remaining_percent || 0);
+        const cls = remaining <= 10 ? "error" : remaining <= 30 ? "warn" : "success";
+        const detail = `${label} · 剩余 ${formatUsageNumber(usage.left)} / ${formatUsageNumber(usage.limit)} · 已用 ${formatUsageNumber(usage.usage)}`;
+        return `<span class="pill ${cls}" title="${escapeHtml(detail)}">${label} ${formatPercent(remaining)}</span>`;
+      }
+
+      function attachXFYunHandlers() {
+        document.querySelectorAll("[data-xfyun-add]").forEach((form) => {
+          form.addEventListener("submit", (event) => {
+            event.preventDefault();
+            addXFYunAccount(form).catch(notifyError);
+          });
+        });
+        document.querySelectorAll(".xfyun-update").forEach((button) => {
+          button.addEventListener("click", () => {
+            updateXFYunAccount(button).catch(notifyError);
+          });
+        });
+        document.querySelectorAll(".xfyun-delete").forEach((button) => {
+          button.addEventListener("click", () => {
+            deleteXFYunAccount(button).catch(notifyError);
+          });
+        });
+      }
+
+      async function addXFYunAccount(form) {
+        const name = form.elements.name.value.trim();
+        const ssoSessionId = form.elements.sso_session_id.value.trim();
+        if (!ssoSessionId) throw new Error("请输入 ssoSessionId");
+        const button = form.querySelector("button");
+        button.disabled = true;
+        try {
+          await postJSON("/api/channels/xfyun/accounts", { name, sso_session_id: ssoSessionId });
+          form.reset();
+          await loadChannels();
+        } finally {
+          button.disabled = false;
+        }
+      }
+
+      async function updateXFYunAccount(button) {
+        const accountId = button.dataset.accountId;
+        if (!accountId) return;
+        const value = window.prompt("粘贴新的 ssoSessionId 或完整 Cookie");
+        if (!value || !value.trim()) return;
+        button.disabled = true;
+        try {
+          await putJSON(`/api/channels/xfyun/accounts/${accountId}`, { sso_session_id: value.trim() });
+          await loadChannels();
+        } finally {
+          button.disabled = false;
+        }
+      }
+
+      async function deleteXFYunAccount(button) {
+        const accountId = button.dataset.accountId;
+        if (!accountId || !window.confirm("删除这个讯飞账号？")) return;
+        button.disabled = true;
+        try {
+          await deleteJSON(`/api/channels/xfyun/accounts/${accountId}`);
+          await loadChannels();
+        } finally {
+          button.disabled = false;
+        }
+      }
+
       function formatMoney(value) {
         return `¥${Number(value || 0).toFixed(2)}`;
+      }
+
+      function formatUsageNumber(value) {
+        const n = Number(value || 0);
+        if (Math.abs(n - Math.round(n)) < 0.05) {
+          return fmt.format(Math.round(n));
+        }
+        return n.toLocaleString("zh-CN", { maximumFractionDigits: 1 });
       }
 
       function formatPercent(value) {
