@@ -91,6 +91,7 @@ func (s *Store) Summary(ctx context.Context, tr TimeRange) (Summary, error) {
 		&out.FirstUsedAt,
 		&out.LastUsedAt,
 	)
+	out.QuotaCNY = quotaToCNY(float64(out.Quota), s.billingSettings(ctx))
 	out.GeneratedAt = time.Now().Unix()
 	return out, err
 }
@@ -123,6 +124,8 @@ func (s *Store) KeyUsage(ctx context.Context, filter KeyFilter) ([]KeyUsage, err
 	switch strings.ToLower(strings.TrimSpace(filter.Sort)) {
 	case "requests", "request_count", "calls":
 		orderBy = "request_count DESC, total_tokens DESC"
+	case "cost", "quota", "money":
+		orderBy = "quota DESC, request_count DESC"
 	}
 	query := fmt.Sprintf(`
 		SELECT
@@ -149,6 +152,7 @@ func (s *Store) KeyUsage(ctx context.Context, filter KeyFilter) ([]KeyUsage, err
 		ORDER BY %s
 		LIMIT %s`, s.keyTailExpr("t"), keyValueSelect, where, orderBy, s.placeholder(len(args)))
 
+	settings := s.billingSettings(ctx)
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -178,69 +182,14 @@ func (s *Store) KeyUsage(ctx context.Context, filter KeyFilter) ([]KeyUsage, err
 		); err != nil {
 			return nil, err
 		}
+		item.QuotaCNY = quotaToCNY(float64(item.Quota), settings)
 		items = append(items, item)
 	}
 	return items, rows.Err()
 }
 
 func (s *Store) ModelUsage(ctx context.Context, filter ModelFilter) ([]ModelUsage, error) {
-	ctx, cancel := s.context(ctx)
-	defer cancel()
-
-	if filter.TokenID <= 0 {
-		return []ModelUsage{}, nil
-	}
-	if filter.Limit <= 0 || filter.Limit > 500 {
-		filter.Limit = 100
-	}
-	where, args := s.where("l", filter.TimeRange, "l.token_id = "+s.placeholder(1))
-	args = append([]any{filter.TokenID}, args...)
-	args = append(args, filter.Limit)
-
-	query := fmt.Sprintf(`
-		SELECT
-			COALESCE(NULLIF(l.model_name, ''), 'unknown') AS model_name,
-			COUNT(*) AS request_count,
-			COALESCE(SUM(l.prompt_tokens), 0) AS input_tokens,
-			COALESCE(SUM(l.completion_tokens), 0) AS output_tokens,
-			COALESCE(SUM(l.prompt_tokens + l.completion_tokens), 0) AS total_tokens,
-			COALESCE(SUM(l.quota), 0) AS quota,
-			SUM(CASE WHEN l.type = 2 THEN 1 ELSE 0 END) AS success_count,
-			SUM(CASE WHEN l.type = 5 THEN 1 ELSE 0 END) AS error_count,
-			COALESCE(MIN(l.created_at), 0) AS first_used_at,
-			COALESCE(MAX(l.created_at), 0) AS last_used_at
-		FROM logs l
-		%s
-		GROUP BY COALESCE(NULLIF(l.model_name, ''), 'unknown')
-		ORDER BY total_tokens DESC, request_count DESC
-		LIMIT %s`, where, s.placeholder(len(args)))
-
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	items := make([]ModelUsage, 0)
-	for rows.Next() {
-		var item ModelUsage
-		if err := rows.Scan(
-			&item.ModelName,
-			&item.RequestCount,
-			&item.InputTokens,
-			&item.OutputTokens,
-			&item.TotalTokens,
-			&item.Quota,
-			&item.SuccessCount,
-			&item.ErrorCount,
-			&item.FirstUsedAt,
-			&item.LastUsedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
+	return s.modelUsageWithBilling(ctx, filter)
 }
 
 func (s *Store) Logs(ctx context.Context, filter LogFilter) (LogPage, error) {
@@ -336,6 +285,7 @@ func (s *Store) Logs(ctx context.Context, filter LogFilter) (LogPage, error) {
 		ORDER BY l.id DESC
 		LIMIT %s OFFSET %s`, s.keyTailExpr("t"), where, s.placeholder(len(queryArgs)-1), s.placeholder(len(queryArgs)))
 
+	settings := s.billingSettings(ctx)
 	rows, err := s.db.QueryContext(ctx, query, queryArgs...)
 	if err != nil {
 		return LogPage{}, err
@@ -371,6 +321,7 @@ func (s *Store) Logs(ctx context.Context, filter LogFilter) (LogPage, error) {
 		); err != nil {
 			return LogPage{}, err
 		}
+		s.enrichUsageLog(&item, settings)
 		items = append(items, item)
 	}
 
@@ -435,6 +386,9 @@ func (s *Store) LogByID(ctx context.Context, id int64) (UsageLog, error) {
 		&item.Content,
 		&item.Other,
 	)
+	if err == nil {
+		s.enrichUsageLog(&item, s.billingSettings(ctx))
+	}
 	return item, err
 }
 

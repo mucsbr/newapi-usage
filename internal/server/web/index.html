@@ -713,6 +713,26 @@
         font-variant-numeric: tabular-nums;
       }
 
+      .token-breakdown,
+      .cost-breakdown {
+        display: grid;
+        gap: 2px;
+        font-size: 11px;
+        line-height: 1.25;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .token-breakdown small,
+      .cost-breakdown small {
+        color: var(--muted);
+        font-size: 10px;
+      }
+
+      .cost-breakdown strong {
+        font-size: 12px;
+        font-weight: 650;
+      }
+
       .muted {
         color: var(--muted);
       }
@@ -989,7 +1009,7 @@
       <div class="wrap topbar">
         <div>
           <h1>NewAPI Usage</h1>
-          <div class="section-subtitle">按 key 查看模型、输入 tokens、输出 tokens 与请求日志</div>
+          <div class="section-subtitle">按 key 查看模型、Token 明细、人民币费用与请求日志</div>
         </div>
         <div class="log-controls">
           <div id="health" class="pill">checking</div>
@@ -1051,6 +1071,7 @@
                 <select id="keySort">
                   <option value="tokens" selected>总 Tokens</option>
                   <option value="requests">调用次数</option>
+                  <option value="cost">费用</option>
                 </select>
               </label>
               <span id="keyCount" class="pill">0</span>
@@ -1068,6 +1089,7 @@
                   <th class="num">输入</th>
                   <th class="num">输出</th>
                   <th class="num">总 Tokens</th>
+                  <th class="num">费用 (CNY)</th>
                   <th>最后使用</th>
                 </tr>
               </thead>
@@ -1089,9 +1111,8 @@
                 <tr>
                   <th>模型</th>
                   <th class="num">请求</th>
-                  <th class="num">输入</th>
-                  <th class="num">输出</th>
-                  <th class="num">总 Tokens</th>
+                  <th>Tokens</th>
+                  <th>费用 (CNY)</th>
                 </tr>
               </thead>
               <tbody id="modelsBody"></tbody>
@@ -1132,7 +1153,7 @@
                 <th class="num">输入</th>
                 <th class="num">输出</th>
                 <th class="num">总 Tokens</th>
-                <th class="num">额度</th>
+                <th class="num">费用 (CNY)</th>
                 <th>用户</th>
                 <th>渠道</th>
                 <th>IP</th>
@@ -1286,10 +1307,10 @@
           ["输入 Tokens", data.input_tokens],
           ["输出 Tokens", data.output_tokens],
           ["总 Tokens", data.total_tokens],
-          ["额度", data.quota],
+          ["费用 (CNY)", formatCNY(data.quota_cny), true],
         ];
         el("summary").innerHTML = items
-          .map(([label, value]) => `<div class="metric"><span>${label}</span><strong>${fmt.format(value || 0)}</strong></div>`)
+          .map(([label, value, formatted]) => `<div class="metric"><span>${label}</span><strong>${formatted ? value : fmt.format(value || 0)}</strong></div>`)
           .join("");
       }
 
@@ -1663,6 +1684,12 @@
         return `¥${Number(value || 0).toFixed(2)}`;
       }
 
+      function formatCNY(value) {
+        const amount = Number(value || 0);
+        const digits = Math.abs(amount) >= 0.01 ? 2 : 4;
+        return `¥${amount.toFixed(digits)}`;
+      }
+
       function formatUsageNumber(value) {
         const n = Number(value || 0);
         if (Math.abs(n - Math.round(n)) < 0.05) {
@@ -1685,10 +1712,15 @@
       }
 
       function renderKeys(items) {
-        el("keySortHint").textContent = el("keySort").value === "requests" ? "按调用次数降序排列" : "按总 tokens 降序排列";
+        const sortHint = {
+          tokens: "按总 tokens 降序排列",
+          requests: "按调用次数降序排列",
+          cost: "按费用降序排列",
+        };
+        el("keySortHint").textContent = sortHint[el("keySort").value] || sortHint.tokens;
         el("keyCount").textContent = `${items.length} keys`;
         if (!items.length) {
-          el("keysBody").innerHTML = `<tr><td colspan="9" class="empty">没有数据</td></tr>`;
+          el("keysBody").innerHTML = `<tr><td colspan="10" class="empty">没有数据</td></tr>`;
           return;
         }
         el("keysBody").innerHTML = items
@@ -1705,6 +1737,7 @@
                 <td class="num">${fmt.format(item.input_tokens || 0)}</td>
                 <td class="num">${fmt.format(item.output_tokens || 0)}</td>
                 <td class="num">${fmt.format(item.total_tokens || 0)}</td>
+                <td class="num">${formatCNY(item.quota_cny)}</td>
                 <td>${tsToText(item.last_used_at)}</td>
               </tr>
             `;
@@ -1733,7 +1766,7 @@
 
       function renderModels(items) {
         if (!items.length) {
-          el("modelsBody").innerHTML = `<tr><td colspan="5" class="empty">没有数据</td></tr>`;
+          el("modelsBody").innerHTML = `<tr><td colspan="4" class="empty">没有数据</td></tr>`;
           return;
         }
         el("modelsBody").innerHTML = items
@@ -1742,13 +1775,32 @@
               <tr>
                 <td>${escapeHtml(item.model_name || "unknown")}</td>
                 <td class="num">${fmt.format(item.request_count || 0)}</td>
-                <td class="num">${fmt.format(item.input_tokens || 0)}</td>
-                <td class="num">${fmt.format(item.output_tokens || 0)}</td>
-                <td class="num">${fmt.format(item.total_tokens || 0)}</td>
+                <td>${modelTokenBreakdownHTML(item)}</td>
+                <td>${modelCostBreakdownHTML(item)}</td>
               </tr>
             `,
           )
           .join("");
+      }
+
+      function modelTokenBreakdownHTML(item) {
+        const caches = [];
+        if (item.cache_read_tokens) caches.push(`读 ${fmt.format(item.cache_read_tokens)}`);
+        if (item.cache_write_tokens) caches.push(`写 ${fmt.format(item.cache_write_tokens)}`);
+        return `<div class="token-breakdown"><span>入 ${fmt.format(item.input_tokens || 0)} / 出 ${fmt.format(item.output_tokens || 0)}</span>${caches.length ? `<small>${caches.join(" · ")}</small>` : ""}</div>`;
+      }
+
+      function modelCostBreakdownHTML(item) {
+        const parts = [
+          ["入", item.input_cost_cny],
+          ["出", item.output_cost_cny],
+          ["读", item.cache_read_cost_cny],
+          ["写", item.cache_write_cost_cny],
+          ["其", item.other_cost_cny],
+        ]
+          .filter(([, value]) => Math.abs(Number(value || 0)) >= 0.000001)
+          .map(([label, value]) => `${label} ${formatCNY(value)}`);
+        return `<div class="cost-breakdown"><strong>${formatCNY(item.quota_cny)}</strong>${parts.length ? `<small>${parts.join(" · ")}</small>` : ""}</div>`;
       }
 
       function renderLogs(data) {
@@ -1775,7 +1827,7 @@
                 <td class="num">${fmt.format(item.input_tokens || 0)}</td>
                 <td class="num">${fmt.format(item.output_tokens || 0)}</td>
                 <td class="num">${fmt.format(item.total_tokens || 0)}</td>
-                <td class="num">${fmt.format(item.quota || 0)}</td>
+                <td class="num">${formatCNY(item.quota_cny)}</td>
                 <td>${escapeHtml(item.username || "")}</td>
                 <td>${escapeHtml(item.channel_name || String(item.channel_id || ""))}</td>
                 <td>${escapeHtml(item.ip || "")}</td>

@@ -40,6 +40,7 @@ type Summary struct {
 	OutputTokens int64 `json:"output_tokens"`
 	TotalTokens  int64 `json:"total_tokens"`
 	Quota        int64 `json:"quota"`
+	QuotaCNY     float64 `json:"quota_cny"`
 	FirstUsedAt  int64 `json:"first_used_at"`
 	LastUsedAt   int64 `json:"last_used_at"`
 	GeneratedAt  int64 `json:"generated_at"`
@@ -60,6 +61,7 @@ type KeyUsage struct {
 	OutputTokens int64  `json:"output_tokens"`
 	TotalTokens  int64  `json:"total_tokens"`
 	Quota        int64  `json:"quota"`
+	QuotaCNY     float64 `json:"quota_cny"`
 	FirstUsedAt  int64  `json:"first_used_at"`
 	LastUsedAt   int64  `json:"last_used_at"`
 }
@@ -71,6 +73,14 @@ type ModelUsage struct {
 	OutputTokens int64  `json:"output_tokens"`
 	TotalTokens  int64  `json:"total_tokens"`
 	Quota        int64  `json:"quota"`
+	QuotaCNY     float64 `json:"quota_cny"`
+	CacheReadTokens  int64   `json:"cache_read_tokens"`
+	CacheWriteTokens int64   `json:"cache_write_tokens"`
+	InputCostCNY     float64 `json:"input_cost_cny"`
+	OutputCostCNY    float64 `json:"output_cost_cny"`
+	CacheReadCostCNY float64 `json:"cache_read_cost_cny"`
+	CacheWriteCostCNY float64 `json:"cache_write_cost_cny"`
+	OtherCostCNY     float64 `json:"other_cost_cny"`
 	SuccessCount int64  `json:"success_count"`
 	ErrorCount   int64  `json:"error_count"`
 	FirstUsedAt  int64  `json:"first_used_at"`
@@ -93,6 +103,9 @@ type UsageLog struct {
 	OutputTokens  int64  `json:"output_tokens"`
 	TotalTokens   int64  `json:"total_tokens"`
 	Quota         int64  `json:"quota"`
+	QuotaCNY      float64 `json:"quota_cny"`
+	CacheReadTokens  int64 `json:"cache_read_tokens"`
+	CacheWriteTokens int64 `json:"cache_write_tokens"`
 	UseTime       int64  `json:"use_time"`
 	IsStream      bool   `json:"is_stream"`
 	ChannelID     int64  `json:"channel_id"`

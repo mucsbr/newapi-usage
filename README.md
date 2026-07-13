@@ -9,7 +9,9 @@ It does not proxy traffic and does not modify NewAPI tables. It connects to the 
 - model list per key
 - input tokens (`logs.prompt_tokens`)
 - output tokens (`logs.completion_tokens`)
-- total tokens and quota
+- cache read/write tokens from `logs.other`
+- actual charged cost in CNY (`logs.quota`, `QuotaPerUnit`, and `USDExchangeRate`)
+- per-model input/output/cache cost breakdown when the log contains ratio billing metadata
 - request log list with model, channel, user, IP, and request ID
 
 ## Quick Start
