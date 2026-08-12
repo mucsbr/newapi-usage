@@ -61,6 +61,14 @@ type Config struct {
 	Sub2APITimeout  time.Duration
 	Sub2APIPageSize int
 
+	// OpenCode Go Manager account usage.
+	OpenCodeBaseURL     string
+	OpenCodeUsername    string
+	OpenCodePassword    string
+	OpenCodeLabel       string
+	OpenCodeTimeout     time.Duration
+	OpenCodeConcurrency int
+
 	// Ikun quota enrichment for the matching Sub2API account.
 	IkunAPIBase           string
 	IkunAccessToken       string
@@ -116,6 +124,13 @@ func Load() (Config, error) {
 		Sub2APITimezone: getEnv("SUB2API_TIMEZONE", "Asia/Shanghai"),
 		Sub2APITimeout:  time.Duration(getEnvInt("SUB2API_TIMEOUT_SECONDS", 15)) * time.Second,
 		Sub2APIPageSize: getEnvInt("SUB2API_PAGE_SIZE", 50),
+
+		OpenCodeBaseURL:     getEnv("OPENCODE_BASE_URL", ""),
+		OpenCodeUsername:    getEnv("OPENCODE_USERNAME", "admin"),
+		OpenCodePassword:    getEnv("OPENCODE_PASSWORD", ""),
+		OpenCodeLabel:       getEnv("OPENCODE_LABEL", "OpenCode"),
+		OpenCodeTimeout:     time.Duration(getEnvInt("OPENCODE_TIMEOUT_SECONDS", 30)) * time.Second,
+		OpenCodeConcurrency: getEnvInt("OPENCODE_CONCURRENCY", 5),
 
 		IkunAPIBase:           getEnv("IKUN_API_BASE", "https://api.ikuncode.cc"),
 		IkunAccessToken:       firstEnv("IKUN_ACCESS_TOKEN", "IKUN_API_KEY"),
@@ -211,6 +226,22 @@ func Load() (Config, error) {
 	if cfg.Sub2APIPageSize > 500 {
 		cfg.Sub2APIPageSize = 500
 	}
+	cfg.OpenCodeBaseURL = strings.TrimRight(strings.TrimSpace(cfg.OpenCodeBaseURL), "/")
+	if strings.TrimSpace(cfg.OpenCodeUsername) == "" {
+		cfg.OpenCodeUsername = "admin"
+	}
+	if strings.TrimSpace(cfg.OpenCodeLabel) == "" {
+		cfg.OpenCodeLabel = "OpenCode"
+	}
+	if cfg.OpenCodeTimeout <= 0 {
+		cfg.OpenCodeTimeout = 30 * time.Second
+	}
+	if cfg.OpenCodeConcurrency <= 0 {
+		cfg.OpenCodeConcurrency = 5
+	}
+	if cfg.OpenCodeConcurrency > 20 {
+		cfg.OpenCodeConcurrency = 20
+	}
 	cfg.IkunAPIBase = strings.TrimRight(strings.TrimSpace(cfg.IkunAPIBase), "/")
 	if cfg.IkunAPIBase == "" {
 		cfg.IkunAPIBase = "https://api.ikuncode.cc"
@@ -258,6 +289,12 @@ func (c Config) Sub2APIEnabled() bool {
 	return strings.TrimSpace(c.Sub2APIBaseURL) != "" && strings.TrimSpace(c.Sub2APIKey) != ""
 }
 
+func (c Config) OpenCodeEnabled() bool {
+	return strings.TrimSpace(c.OpenCodeBaseURL) != "" &&
+		strings.TrimSpace(c.OpenCodeUsername) != "" &&
+		strings.TrimSpace(c.OpenCodePassword) != ""
+}
+
 func (c Config) IkunEnabled() bool {
 	return strings.TrimSpace(c.IkunAccessToken) != "" && c.IkunUserID > 0
 }
@@ -268,7 +305,7 @@ func (c Config) XFYunChannelEnabled() bool {
 
 // ChannelsEnabled reports whether the channel balance feature is active at all.
 func (c Config) ChannelsEnabled() bool {
-	return c.DeepSeekEnabled() || c.CPAEnabled() || c.Sub2APIEnabled() || c.XFYunChannelEnabled()
+	return c.DeepSeekEnabled() || c.CPAEnabled() || c.Sub2APIEnabled() || c.OpenCodeEnabled() || c.XFYunChannelEnabled()
 }
 
 func (c Config) Addr() string {

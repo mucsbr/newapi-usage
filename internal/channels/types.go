@@ -5,6 +5,7 @@ const (
 	KindCurrency = "currency" // DeepSeek-style monetary balance.
 	KindPool     = "pool"     // CPA-style account pool with quota usage.
 	KindSub2API  = "sub2api"  // Sub2API account list with estimated/live usage.
+	KindOpenCode = "opencode" // OpenCode Go Manager account usage.
 	KindXFYun    = "xfyun"    // XFYun MaaS coding-plan package and rate quotas.
 )
 
@@ -30,6 +31,9 @@ type Balance struct {
 
 	// Sub2API account channel.
 	Sub2API *Sub2APISummary `json:"sub2api,omitempty"`
+
+	// OpenCode Go Manager account channel.
+	OpenCode *OpenCodeSummary `json:"opencode,omitempty"`
 
 	// XFYun MaaS coding-plan channel.
 	XFYun *XFYunSummary `json:"xfyun,omitempty"`
@@ -132,8 +136,44 @@ type Sub2APIAccountQuota struct {
 	Error        string  `json:"error,omitempty"`
 }
 
+type OpenCodeSummary struct {
+	Total    int               `json:"total"`
+	Accounts []OpenCodeAccount `json:"accounts"`
+}
+
+type OpenCodeAccount struct {
+	ID              string                `json:"id"`
+	Name            string                `json:"name"`
+	Username        string                `json:"username,omitempty"`
+	Enabled         bool                  `json:"enabled"`
+	AccountType     string                `json:"account_type"`
+	SetupStep       string                `json:"setup_step"`
+	PurchaseDate    string                `json:"purchase_date,omitempty"`
+	ExpiresOn       string                `json:"expires_on,omitempty"`
+	CanRefreshUsage bool                  `json:"can_refresh_usage"`
+	UsageWindows    []OpenCodeUsageWindow `json:"usage_windows,omitempty"`
+	Error           string                `json:"error,omitempty"`
+}
+
+type OpenCodeUsage struct {
+	AccountID string                `json:"account_id"`
+	Source    string                `json:"source"`
+	Windows   []OpenCodeUsageWindow `json:"windows"`
+}
+
+type OpenCodeUsageWindow struct {
+	Name             string  `json:"name"`
+	Source           string  `json:"source"`
+	LimitUSD         float64 `json:"limit_usd"`
+	UsedUSD          float64 `json:"used_usd"`
+	RemainingUSD     float64 `json:"remaining_usd"`
+	UsedPercent      float64 `json:"used_percent"`
+	RemainingPercent float64 `json:"remaining_percent"`
+	ResetsAt         string  `json:"resets_at,omitempty"`
+}
+
 type XFYunSummary struct {
-	Total    int             `json:"total"`
+	Total    int            `json:"total"`
 	Accounts []XFYunAccount `json:"accounts"`
 }
 

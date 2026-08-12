@@ -443,6 +443,75 @@
         padding-top: 10px;
       }
 
+      .opencode-list {
+        display: grid;
+        gap: 7px;
+        max-height: 340px;
+        overflow: auto;
+        border-top: 1px solid var(--line);
+        padding-top: 10px;
+      }
+
+      .opencode-account {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 5px 8px;
+        min-width: 0;
+        font-size: 11px;
+      }
+
+      .opencode-title {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        min-width: 0;
+        font-weight: 650;
+      }
+
+      .opencode-right,
+      .opencode-usage {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 4px;
+        min-width: 0;
+      }
+
+      .opencode-usage {
+        flex-wrap: wrap;
+      }
+
+      .opencode-usage .pill {
+        height: 18px;
+        padding: 0 5px;
+        font-size: 10px;
+      }
+
+      .opencode-meta {
+        grid-column: 1 / -1;
+        color: var(--muted);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 10px;
+      }
+
+      .opencode-refresh {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 22px;
+        height: 20px;
+        padding: 0;
+        gap: 0;
+        flex-shrink: 0;
+      }
+
+      .opencode-refresh.loading .refresh-icon {
+        animation: spin 0.8s linear infinite;
+      }
+
       .sub2-account {
         display: flex;
         align-items: center;
@@ -1339,6 +1408,7 @@
         el("channelsMeta").textContent = `${list.length} 渠道`;
         el("channelsGrid").innerHTML = list.map(channelCardHTML).join("");
         attachSub2APIHandlers();
+        attachOpenCodeHandlers();
         attachXFYunHandlers();
         const refreshing = list.some((c) => !c.ok && c.error === "refreshing");
         if (refreshing && channelsRetry < 5) {
@@ -1351,12 +1421,13 @@
 
       function channelCardHTML(c) {
         if (c.kind === "sub2api") return sub2apiCardHTML(c);
+        if (c.kind === "opencode") return openCodeCardHTML(c);
         if (c.kind === "xfyun") return xfyunCardHTML(c);
         return c.kind === "pool" ? poolCardHTML(c) : currencyCardHTML(c);
       }
 
       function cardShell(c, statusPill, bodyHTML) {
-        const kindBadge = c.kind === "sub2api" ? "Sub2API" : c.kind === "xfyun" ? "MaaS" : c.kind === "pool" ? "账号池" : "余额";
+        const kindBadge = c.kind === "sub2api" ? "Sub2API" : c.kind === "opencode" ? "OpenCode" : c.kind === "xfyun" ? "MaaS" : c.kind === "pool" ? "账号池" : "余额";
         return `
           <div class="channel-card">
             <div class="channel-card-head">
@@ -1577,6 +1648,86 @@
           if (target) {
             target.innerHTML = sub2UsageHTML(data.windows || [], Boolean(target.parentElement?.querySelector(".sub2-quota")));
           }
+        } finally {
+          button.disabled = false;
+          button.classList.remove("loading");
+        }
+      }
+
+      function openCodeCardHTML(c) {
+        if (!c.ok) {
+          return cardShell(c, `<span class="pill error">异常</span>`, `<div class="channel-error">${escapeHtml(c.error || "获取失败")}</div>`);
+        }
+        const summary = c.opencode || {};
+        const accounts = summary.accounts || [];
+        const pill = `<span class="pill success">${fmt.format(summary.total || accounts.length || 0)} 账号</span>`;
+        const foot = `<div class="pool-foot"><span>更新于 ${tsToText(c.updated_at)}</span><span>美元额度 · 剩余</span></div>`;
+        const list = accounts.length
+          ? `<div class="opencode-list">${accounts.map(openCodeAccountHTML).join("")}</div>`
+          : `<div class="muted">没有账号</div>`;
+        return cardShell(c, pill, foot + list);
+      }
+
+      function openCodeAccountHTML(account) {
+        const title = account.name || account.username || account.id || "-";
+        const detail = [
+          account.username || "",
+          account.account_type || "",
+          account.enabled ? "已启用" : "已禁用",
+          account.expires_on ? `到期 ${account.expires_on}` : "",
+          account.error || "",
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        const refresh = account.can_refresh_usage
+          ? `<button class="secondary small opencode-refresh" type="button" data-account-id="${escapeHtml(account.id)}" title="获取实时额度"><span class="refresh-icon" aria-hidden="true"></span></button>`
+          : "";
+        const error = account.error && !(account.usage_windows || []).length
+          ? `<span class="pill error" title="${escapeHtml(account.error)}">额度异常</span>`
+          : "";
+        return `
+          <div class="opencode-account" data-opencode-account-id="${escapeHtml(account.id)}">
+            <span class="opencode-title" title="${escapeHtml(detail)}">${escapeHtml(title)}</span>
+            <span class="opencode-right">
+              <span class="opencode-usage" data-opencode-usage="${escapeHtml(account.id)}">${error || openCodeUsageHTML(account.usage_windows || [])}</span>
+              ${refresh}
+            </span>
+            <span class="opencode-meta">${escapeHtml(detail)}</span>
+          </div>
+        `;
+      }
+
+      function openCodeUsageHTML(windows) {
+        if (!windows.length) return `<span class="pill">无额度数据</span>`;
+        return windows.map(openCodeUsagePillHTML).join("");
+      }
+
+      function openCodeUsagePillHTML(win) {
+        const remaining = Number(win.remaining_percent || 0);
+        const cls = remaining <= 10 ? "error" : remaining <= 30 ? "warn" : "success";
+        const source = win.source === "live" ? "实时" : "预估";
+        const reset = win.resets_at ? ` · 重置 ${shortTime(win.resets_at)}` : "";
+        const title = `${win.name} · ${source} · 已用 $${Number(win.used_usd || 0).toFixed(2)} / $${Number(win.limit_usd || 0).toFixed(2)}${reset}`;
+        return `<span class="pill ${cls}" title="${escapeHtml(title)}">${escapeHtml(win.name)} $${Number(win.remaining_usd || 0).toFixed(2)}</span>`;
+      }
+
+      function attachOpenCodeHandlers() {
+        document.querySelectorAll(".opencode-refresh").forEach((button) => {
+          button.addEventListener("click", () => {
+            refreshOpenCodeUsage(button).catch(notifyError);
+          });
+        });
+      }
+
+      async function refreshOpenCodeUsage(button) {
+        const accountId = button.dataset.accountId;
+        if (!accountId) return;
+        button.disabled = true;
+        button.classList.add("loading");
+        try {
+          const data = await postJSON(`/api/channels/opencode/accounts/${encodeURIComponent(accountId)}/usage/refresh`);
+          const target = document.querySelector(`[data-opencode-usage="${CSS.escape(accountId)}"]`);
+          if (target) target.innerHTML = openCodeUsageHTML(data.windows || []);
         } finally {
           button.disabled = false;
           button.classList.remove("loading");

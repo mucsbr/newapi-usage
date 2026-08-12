@@ -160,6 +160,17 @@ IKUN_SUB2API_ACCOUNT_KEY=ikun
 The card lists accounts from `/api/v1/admin/accounts`. If account-list metadata includes usage fields, those are shown as estimated remaining percentages. OAuth accounts also show a live refresh button that calls `/api/v1/admin/accounts/{id}/usage`.
 When Ikun access is configured, the matching Sub2API account is enriched from `/api/user/self`: `quota` is shown as remaining balance, `used_quota` as used amount, and both quota fields are converted to CNY by dividing by `500000` and formatting to two decimals.
 
+OpenCode Go Manager account card:
+
+```env
+OPENCODE_BASE_URL=http://host.docker.internal:9042
+OPENCODE_USERNAME=admin
+OPENCODE_PASSWORD=your-dashboard-password
+OPENCODE_LABEL=OpenCode
+```
+
+The card loads the account list and pricing limits, then shows each account's estimated 5-hour, weekly, and monthly remaining USD quota. Enabled managed accounts have a refresh button that replaces the estimated values with live usage from `/dashboard/api/accounts/{id}/usage/refresh`.
+
 XFYun MaaS coding-plan card:
 
 ```env
@@ -184,6 +195,7 @@ GET /api/logs/{log_id}/audit
 GET /api/audit/status
 GET /api/channels/balance
 GET /api/channels/sub2api/accounts/{account_id}/usage?force=true&timezone=Asia/Shanghai
+POST /api/channels/opencode/accounts/{account_id}/usage/refresh
 POST /api/channels/xfyun/accounts
 PUT /api/channels/xfyun/accounts/{account_id}
 DELETE /api/channels/xfyun/accounts/{account_id}

@@ -8,6 +8,7 @@ import (
 )
 
 var errSub2APINotConfigured = errors.New("sub2api is not configured")
+var errOpenCodeNotConfigured = errors.New("opencode is not configured")
 var errXFYunNotConfigured = errors.New("xfyun is not configured")
 
 // Manager owns the channel balance providers. DeepSeek is fetched live (cheap),
@@ -16,6 +17,7 @@ type Manager struct {
 	deepseek *deepSeekProvider
 	cpa      *cpaProvider
 	sub2api  *sub2APIProvider
+	opencode *openCodeProvider
 	xfyun    *xfyunProvider
 }
 
@@ -57,6 +59,16 @@ func New(cfg config.Config) *Manager {
 			},
 		})
 	}
+	if cfg.OpenCodeEnabled() {
+		m.opencode = newOpenCode(openCodeConfig{
+			Label:       cfg.OpenCodeLabel,
+			BaseURL:     cfg.OpenCodeBaseURL,
+			Username:    cfg.OpenCodeUsername,
+			Password:    cfg.OpenCodePassword,
+			Timeout:     cfg.OpenCodeTimeout,
+			Concurrency: cfg.OpenCodeConcurrency,
+		})
+	}
 	if cfg.XFYunChannelEnabled() {
 		m.xfyun = newXFYun(xfyunConfig{
 			Enabled:      cfg.XFYunEnabled,
@@ -72,7 +84,7 @@ func New(cfg config.Config) *Manager {
 
 // Enabled reports whether any channel is configured.
 func (m *Manager) Enabled() bool {
-	return m != nil && (m.deepseek != nil || m.cpa != nil || m.sub2api != nil || m.xfyun != nil)
+	return m != nil && (m.deepseek != nil || m.cpa != nil || m.sub2api != nil || m.opencode != nil || m.xfyun != nil)
 }
 
 // Start launches background refresh for providers that need it (CPA).
@@ -97,7 +109,7 @@ func (m *Manager) Snapshot(ctx context.Context) []Balance {
 	if m == nil {
 		return []Balance{}
 	}
-	out := make([]Balance, 0, 4)
+	out := make([]Balance, 0, 5)
 	if m.deepseek != nil {
 		out = append(out, m.deepseek.Balance(ctx))
 	}
@@ -107,10 +119,20 @@ func (m *Manager) Snapshot(ctx context.Context) []Balance {
 	if m.sub2api != nil {
 		out = append(out, m.sub2api.Balance(ctx))
 	}
+	if m.opencode != nil {
+		out = append(out, m.opencode.Balance(ctx))
+	}
 	if m.xfyun != nil {
 		out = append(out, m.xfyun.Balance(ctx))
 	}
 	return out
+}
+
+func (m *Manager) RefreshOpenCodeUsage(ctx context.Context, accountID string) (OpenCodeUsage, error) {
+	if m == nil || m.opencode == nil {
+		return OpenCodeUsage{}, errOpenCodeNotConfigured
+	}
+	return m.opencode.RefreshUsage(ctx, accountID)
 }
 
 func (m *Manager) Sub2APIUsage(ctx context.Context, accountID int64, force bool, timezone string) (Sub2APIUsage, error) {

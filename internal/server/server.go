@@ -55,6 +55,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/audit/status", s.handleAuditStatus)
 	s.mux.HandleFunc("/api/channels/balance", s.handleChannelsBalance)
 	s.mux.HandleFunc("/api/channels/sub2api/accounts/", s.handleSub2APIUsage)
+	s.mux.HandleFunc("/api/channels/opencode/accounts/", s.handleOpenCodeUsage)
 	s.mux.HandleFunc("/api/channels/xfyun/accounts", s.handleXFYunAccounts)
 	s.mux.HandleFunc("/api/channels/xfyun/accounts/", s.handleXFYunAccount)
 	s.mux.HandleFunc("/api/keys/", s.handleKeySubroutes)
@@ -307,6 +308,29 @@ func (s *Server) handleSub2APIUsage(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	data, err := s.channels.Sub2APIUsage(r.Context(), accountID, strings.EqualFold(q.Get("force"), "true"), q.Get("timezone"))
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, data)
+}
+
+func (s *Server) handleOpenCodeUsage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if s.channels == nil || !s.channels.Enabled() {
+		writeError(w, http.StatusNotFound, "channels not configured")
+		return
+	}
+	trimmed := strings.TrimPrefix(r.URL.Path, "/api/channels/opencode/accounts/")
+	parts := strings.Split(strings.Trim(trimmed, "/"), "/")
+	if len(parts) != 3 || parts[1] != "usage" || parts[2] != "refresh" || strings.TrimSpace(parts[0]) == "" {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	data, err := s.channels.RefreshOpenCodeUsage(r.Context(), parts[0])
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
