@@ -68,12 +68,15 @@ func TestDeepSeekBalanceHTTPErrorFallsBack(t *testing.T) {
 
 func TestCPARefreshPerAccountWindows(t *testing.T) {
 	// usage builds an api-call envelope with optional rate-limit windows.
-	usage := func(primary, secondary *float64, primarySeconds, secondarySeconds *int64) string {
+	usage := func(primary, secondary *float64, primarySeconds, secondarySeconds, primaryReset, secondaryReset *int64) string {
 		rl := map[string]any{}
 		if primary != nil {
 			window := map[string]any{"used_percent": *primary}
 			if primarySeconds != nil {
 				window["limit_window_seconds"] = *primarySeconds
+			}
+			if primaryReset != nil {
+				window["reset_at"] = *primaryReset
 			}
 			rl["primary_window"] = window
 		}
@@ -81,6 +84,9 @@ func TestCPARefreshPerAccountWindows(t *testing.T) {
 			window := map[string]any{"used_percent": *secondary}
 			if secondarySeconds != nil {
 				window["limit_window_seconds"] = *secondarySeconds
+			}
+			if secondaryReset != nil {
+				window["reset_at"] = *secondaryReset
 			}
 			rl["secondary_window"] = window
 		}
@@ -114,10 +120,12 @@ func TestCPARefreshPerAccountWindows(t *testing.T) {
 			case 1:
 				fiveHours := int64(5 * 60 * 60)
 				week := int64(7 * 24 * 60 * 60)
-				_, _ = io.WriteString(w, usage(pct(20), pct(40), &fiveHours, &week))
+				primaryReset := int64(1_780_000_000)
+				secondaryReset := int64(1_780_500_000)
+				_, _ = io.WriteString(w, usage(pct(20), pct(40), &fiveHours, &week, &primaryReset, &secondaryReset))
 			case 2:
 				week := int64(7 * 24 * 60 * 60)
-				_, _ = io.WriteString(w, usage(pct(98), nil, &week, nil))
+				_, _ = io.WriteString(w, usage(pct(98), nil, &week, nil, nil, nil))
 			case 4:
 				envelope, _ := json.Marshal(map[string]any{"status_code": 401, "body": ""})
 				_, _ = w.Write(envelope)
@@ -169,11 +177,17 @@ func TestCPARefreshPerAccountWindows(t *testing.T) {
 	if a1.Primary.LimitWindowSeconds != 5*60*60 {
 		t.Fatalf("a1 primary window = %d, want 18000", a1.Primary.LimitWindowSeconds)
 	}
+	if a1.Primary.ResetsAt != 1_780_000_000 {
+		t.Fatalf("a1 primary reset = %d, want 1780000000", a1.Primary.ResetsAt)
+	}
 	if a1.Secondary == nil || a1.Secondary.Remaining != 60 {
 		t.Fatalf("a1 secondary remaining = %+v, want 60", a1.Secondary)
 	}
 	if a1.Secondary.LimitWindowSeconds != 7*24*60*60 {
 		t.Fatalf("a1 secondary window = %d, want 604800", a1.Secondary.LimitWindowSeconds)
+	}
+	if a1.Secondary.ResetsAt != 1_780_500_000 {
+		t.Fatalf("a1 secondary reset = %d, want 1780500000", a1.Secondary.ResetsAt)
 	}
 	if a1.Email != "a@example.com" {
 		t.Fatalf("a1 email = %q", a1.Email)

@@ -297,10 +297,14 @@ func (c *cpaProvider) probeOne(ctx context.Context, item map[string]any) PoolAcc
 			PrimaryWindow *struct {
 				UsedPercent        *float64 `json:"used_percent"`
 				LimitWindowSeconds *int64   `json:"limit_window_seconds"`
+				ResetAt            any      `json:"reset_at"`
+				ResetAfterSeconds  *int64   `json:"reset_after_seconds"`
 			} `json:"primary_window"`
 			SecondaryWindow *struct {
 				UsedPercent        *float64 `json:"used_percent"`
 				LimitWindowSeconds *int64   `json:"limit_window_seconds"`
+				ResetAt            any      `json:"reset_at"`
+				ResetAfterSeconds  *int64   `json:"reset_after_seconds"`
 			} `json:"secondary_window"`
 		} `json:"rate_limit"`
 	}
@@ -314,6 +318,7 @@ func (c *cpaProvider) probeOne(ctx context.Context, item map[string]any) PoolAcc
 			UsedPercent:        *pw.UsedPercent,
 			Remaining:          100 - *pw.UsedPercent,
 			LimitWindowSeconds: windowSeconds(pw.LimitWindowSeconds),
+			ResetsAt:           windowResetAt(pw.ResetAt, pw.ResetAfterSeconds),
 		}
 	}
 	if sw := usage.RateLimit.SecondaryWindow; sw != nil && sw.UsedPercent != nil {
@@ -321,6 +326,7 @@ func (c *cpaProvider) probeOne(ctx context.Context, item map[string]any) PoolAcc
 			UsedPercent:        *sw.UsedPercent,
 			Remaining:          100 - *sw.UsedPercent,
 			LimitWindowSeconds: windowSeconds(sw.LimitWindowSeconds),
+			ResetsAt:           windowResetAt(sw.ResetAt, sw.ResetAfterSeconds),
 		}
 	}
 	return account
@@ -331,6 +337,34 @@ func windowSeconds(value *int64) int64 {
 		return 0
 	}
 	return *value
+}
+
+func windowResetAt(value any, after *int64) int64 {
+	if timestamp := normalizeUnixTimestamp(value); timestamp > 0 {
+		return timestamp
+	}
+	if after != nil && *after > 0 {
+		return time.Now().Add(time.Duration(*after) * time.Second).Unix()
+	}
+	return 0
+}
+
+func normalizeUnixTimestamp(value any) int64 {
+	var timestamp int64
+	switch v := value.(type) {
+	case float64:
+		timestamp = int64(v)
+	case string:
+		if parsed, err := strconv.ParseFloat(v, 64); err == nil {
+			timestamp = int64(parsed)
+		} else if parsed, err := time.Parse(time.RFC3339, v); err == nil {
+			return parsed.Unix()
+		}
+	}
+	if timestamp > 1_000_000_000_000 {
+		return timestamp / 1000
+	}
+	return timestamp
 }
 
 // --- auth-file field extraction (mirrors pool_maintainer.py helpers) ---

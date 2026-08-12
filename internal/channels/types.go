@@ -67,6 +67,7 @@ type WindowUsage struct {
 	UsedPercent        float64 `json:"used_percent"`
 	Remaining          float64 `json:"remaining_percent"`
 	LimitWindowSeconds int64   `json:"limit_window_seconds,omitempty"`
+	ResetsAt           int64   `json:"resets_at,omitempty"`
 }
 
 // Sub2APISummary lists Sub2API accounts. OAuth accounts can be refreshed
