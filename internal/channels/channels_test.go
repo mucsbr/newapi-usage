@@ -67,15 +67,22 @@ func TestDeepSeekBalanceHTTPErrorFallsBack(t *testing.T) {
 }
 
 func TestCPARefreshPerAccountWindows(t *testing.T) {
-	// usage builds an api-call envelope with optional primary (5h) and
-	// secondary (weekly) window used-percents.
-	usage := func(primary, secondary *float64) string {
+	// usage builds an api-call envelope with optional rate-limit windows.
+	usage := func(primary, secondary *float64, primarySeconds, secondarySeconds *int64) string {
 		rl := map[string]any{}
 		if primary != nil {
-			rl["primary_window"] = map[string]any{"used_percent": *primary}
+			window := map[string]any{"used_percent": *primary}
+			if primarySeconds != nil {
+				window["limit_window_seconds"] = *primarySeconds
+			}
+			rl["primary_window"] = window
 		}
 		if secondary != nil {
-			rl["secondary_window"] = map[string]any{"used_percent": *secondary}
+			window := map[string]any{"used_percent": *secondary}
+			if secondarySeconds != nil {
+				window["limit_window_seconds"] = *secondarySeconds
+			}
+			rl["secondary_window"] = window
 		}
 		raw, _ := json.Marshal(map[string]any{"rate_limit": rl})
 		envelope, _ := json.Marshal(map[string]any{"status_code": 200, "body": string(raw)})
@@ -105,9 +112,12 @@ func TestCPARefreshPerAccountWindows(t *testing.T) {
 			_ = json.Unmarshal(payload, &parsed)
 			switch int(parsed.AuthIndex) {
 			case 1:
-				_, _ = io.WriteString(w, usage(pct(20), pct(40))) // both windows
+				fiveHours := int64(5 * 60 * 60)
+				week := int64(7 * 24 * 60 * 60)
+				_, _ = io.WriteString(w, usage(pct(20), pct(40), &fiveHours, &week))
 			case 2:
-				_, _ = io.WriteString(w, usage(pct(98), nil)) // 5h only
+				week := int64(7 * 24 * 60 * 60)
+				_, _ = io.WriteString(w, usage(pct(98), nil, &week, nil))
 			case 4:
 				envelope, _ := json.Marshal(map[string]any{"status_code": 401, "body": ""})
 				_, _ = w.Write(envelope)
@@ -156,17 +166,26 @@ func TestCPARefreshPerAccountWindows(t *testing.T) {
 	if a1.Primary == nil || a1.Primary.Remaining != 80 {
 		t.Fatalf("a1 primary remaining = %+v, want 80", a1.Primary)
 	}
+	if a1.Primary.LimitWindowSeconds != 5*60*60 {
+		t.Fatalf("a1 primary window = %d, want 18000", a1.Primary.LimitWindowSeconds)
+	}
 	if a1.Secondary == nil || a1.Secondary.Remaining != 60 {
 		t.Fatalf("a1 secondary remaining = %+v, want 60", a1.Secondary)
+	}
+	if a1.Secondary.LimitWindowSeconds != 7*24*60*60 {
+		t.Fatalf("a1 secondary window = %d, want 604800", a1.Secondary.LimitWindowSeconds)
 	}
 	if a1.Email != "a@example.com" {
 		t.Fatalf("a1 email = %q", a1.Email)
 	}
 
-	// account 2: 5h only, no weekly window.
+	// account 2: a weekly primary window only, no secondary window.
 	a2 := byName["b"]
 	if a2.Primary == nil || a2.Primary.Remaining != 2 {
 		t.Fatalf("a2 primary remaining = %+v, want 2", a2.Primary)
+	}
+	if a2.Primary.LimitWindowSeconds != 7*24*60*60 {
+		t.Fatalf("a2 primary window = %d, want 604800", a2.Primary.LimitWindowSeconds)
 	}
 	if a2.Secondary != nil {
 		t.Fatalf("a2 secondary = %+v, want nil", a2.Secondary)

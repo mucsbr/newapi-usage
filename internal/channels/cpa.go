@@ -295,10 +295,12 @@ func (c *cpaProvider) probeOne(ctx context.Context, item map[string]any) PoolAcc
 	var usage struct {
 		RateLimit struct {
 			PrimaryWindow *struct {
-				UsedPercent *float64 `json:"used_percent"`
+				UsedPercent        *float64 `json:"used_percent"`
+				LimitWindowSeconds *int64   `json:"limit_window_seconds"`
 			} `json:"primary_window"`
 			SecondaryWindow *struct {
-				UsedPercent *float64 `json:"used_percent"`
+				UsedPercent        *float64 `json:"used_percent"`
+				LimitWindowSeconds *int64   `json:"limit_window_seconds"`
 			} `json:"secondary_window"`
 		} `json:"rate_limit"`
 	}
@@ -308,12 +310,27 @@ func (c *cpaProvider) probeOne(ctx context.Context, item map[string]any) PoolAcc
 	}
 
 	if pw := usage.RateLimit.PrimaryWindow; pw != nil && pw.UsedPercent != nil {
-		account.Primary = &WindowUsage{UsedPercent: *pw.UsedPercent, Remaining: 100 - *pw.UsedPercent}
+		account.Primary = &WindowUsage{
+			UsedPercent:        *pw.UsedPercent,
+			Remaining:          100 - *pw.UsedPercent,
+			LimitWindowSeconds: windowSeconds(pw.LimitWindowSeconds),
+		}
 	}
 	if sw := usage.RateLimit.SecondaryWindow; sw != nil && sw.UsedPercent != nil {
-		account.Secondary = &WindowUsage{UsedPercent: *sw.UsedPercent, Remaining: 100 - *sw.UsedPercent}
+		account.Secondary = &WindowUsage{
+			UsedPercent:        *sw.UsedPercent,
+			Remaining:          100 - *sw.UsedPercent,
+			LimitWindowSeconds: windowSeconds(sw.LimitWindowSeconds),
+		}
 	}
 	return account
+}
+
+func windowSeconds(value *int64) int64 {
+	if value == nil || *value <= 0 {
+		return 0
+	}
+	return *value
 }
 
 // --- auth-file field extraction (mirrors pool_maintainer.py helpers) ---

@@ -52,20 +52,21 @@ type PoolSummary struct {
 	Accounts []PoolAccount `json:"accounts"` // one row per auth file
 }
 
-// PoolAccount is one auth file's usage. ChatGPT's wham/usage exposes two
-// rate-limit windows: primary = 5-hour limit, secondary = weekly limit.
+// PoolAccount is one auth file's usage. The API's primary and secondary
+// windows can change over time; LimitWindowSeconds identifies each window.
 type PoolAccount struct {
 	Name      string       `json:"name"`
 	Email     string       `json:"email,omitempty"`
-	Primary   *WindowUsage `json:"primary_window,omitempty"`   // 5-hour limit
-	Secondary *WindowUsage `json:"secondary_window,omitempty"` // weekly limit
+	Primary   *WindowUsage `json:"primary_window,omitempty"`
+	Secondary *WindowUsage `json:"secondary_window,omitempty"`
 	Error     string       `json:"error,omitempty"`
 }
 
 // WindowUsage is one rate-limit window's usage. Remaining is 100 - UsedPercent.
 type WindowUsage struct {
-	UsedPercent float64 `json:"used_percent"`
-	Remaining   float64 `json:"remaining_percent"`
+	UsedPercent        float64 `json:"used_percent"`
+	Remaining          float64 `json:"remaining_percent"`
+	LimitWindowSeconds int64   `json:"limit_window_seconds,omitempty"`
 }
 
 // Sub2APISummary lists Sub2API accounts. OAuth accounts can be refreshed

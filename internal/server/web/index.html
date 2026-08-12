@@ -1399,7 +1399,7 @@
         const p = c.pool || {};
         const accounts = p.accounts || [];
         const pill = `<span class="pill success">${fmt.format(p.total || 0)} 账号</span>`;
-        const foot = `<div class="pool-foot"><span>更新于 ${tsToText(c.updated_at)}</span><span>5h / 周 · 剩余%</span></div>`;
+        const foot = `<div class="pool-foot"><span>更新于 ${tsToText(c.updated_at)}</span><span>额度窗口 · 剩余%</span></div>`;
         const list = accounts.length
           ? `<div class="pool-list">${accounts.map(poolAccountHTML).join("")}</div>`
           : `<div class="muted">没有账号</div>`;
@@ -1415,13 +1415,23 @@
         return `<span class="pill ${cls}" title="${label}窗口已用 ${win.used_percent.toFixed(1)}%">${label} ${r.toFixed(0)}%</span>`;
       }
 
+      function windowLabel(win, fallback) {
+        const seconds = Number(win?.limit_window_seconds || 0);
+        if (!Number.isFinite(seconds) || seconds <= 0) return fallback;
+        if (seconds === 7 * 24 * 60 * 60) return "周";
+        if (seconds % (24 * 60 * 60) === 0) return `${seconds / (24 * 60 * 60)}天`;
+        if (seconds % (60 * 60) === 0) return `${seconds / (60 * 60)}h`;
+        if (seconds % 60 === 0) return `${seconds / 60}m`;
+        return `${seconds}s`;
+      }
+
       function poolAccountHTML(a) {
         const label = a.email || a.name || "-";
         let right;
         if (a.error) {
           right = `<span class="pool-windows"><span class="pill error">${escapeHtml(a.error)}</span></span>`;
         } else {
-          right = `<span class="pool-windows">${windowBadge("5h", a.primary_window)}${windowBadge("周", a.secondary_window)}</span>`;
+          right = `<span class="pool-windows">${windowBadge(windowLabel(a.primary_window, "主"), a.primary_window)}${windowBadge(windowLabel(a.secondary_window, "副"), a.secondary_window)}</span>`;
         }
         return `<div class="pool-account"><span class="email" title="${escapeHtml(label)}">${escapeHtml(label)}</span>${right}</div>`;
       }
