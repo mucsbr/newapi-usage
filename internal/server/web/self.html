@@ -1,0 +1,790 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>API Key 使用查询</title>
+    <style>
+      :root {
+        --bg: #eef2f7;
+        --panel: rgba(255, 255, 255, 0.76);
+        --panel-strong: rgba(255, 255, 255, 0.9);
+        --text: #172033;
+        --muted: #657086;
+        --line: rgba(57, 69, 92, 0.16);
+        --accent: #087f5b;
+        --accent-soft: rgba(8, 127, 91, 0.12);
+        --danger: #c92a2a;
+        --warning: #b26a00;
+        --shadow: 0 16px 46px rgba(33, 44, 66, 0.12);
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #11151c;
+          --panel: rgba(28, 34, 44, 0.78);
+          --panel-strong: rgba(34, 41, 53, 0.92);
+          --text: #f2f5f9;
+          --muted: #aab4c4;
+          --line: rgba(215, 224, 238, 0.14);
+          --accent: #5ed6ad;
+          --accent-soft: rgba(94, 214, 173, 0.12);
+          --danger: #ff8787;
+          --warning: #ffd166;
+          --shadow: 0 18px 52px rgba(0, 0, 0, 0.28);
+        }
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--bg);
+        color: var(--text);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        letter-spacing: 0;
+      }
+
+      button,
+      input,
+      select {
+        font: inherit;
+      }
+
+      button,
+      input,
+      select {
+        border: 1px solid var(--line);
+        border-radius: 7px;
+      }
+
+      input,
+      select {
+        height: 38px;
+        padding: 0 11px;
+        background: var(--panel-strong);
+        color: var(--text);
+        outline: none;
+      }
+
+      input:focus,
+      select:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px var(--accent-soft);
+      }
+
+      button {
+        height: 38px;
+        padding: 0 14px;
+        background: var(--accent);
+        color: #fff;
+        border-color: transparent;
+        cursor: pointer;
+        font-weight: 650;
+      }
+
+      button.secondary {
+        color: var(--text);
+        background: var(--panel-strong);
+        border-color: var(--line);
+      }
+
+      button:disabled {
+        cursor: default;
+        opacity: 0.5;
+      }
+
+      .hidden {
+        display: none !important;
+      }
+
+      .shell {
+        width: min(1440px, calc(100vw - 28px));
+        margin: 0 auto;
+      }
+
+      .glass {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(24px) saturate(150%);
+        -webkit-backdrop-filter: blur(24px) saturate(150%);
+      }
+
+      .login-view {
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 20px;
+      }
+
+      .login-panel {
+        width: min(440px, 100%);
+        padding: 24px;
+        display: grid;
+        gap: 18px;
+      }
+
+      h1,
+      h2,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        font-size: 24px;
+      }
+
+      h2 {
+        font-size: 16px;
+      }
+
+      .muted {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .login-form {
+        display: grid;
+        gap: 10px;
+      }
+
+      label {
+        display: grid;
+        gap: 6px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .login-error {
+        min-height: 18px;
+        color: var(--danger);
+        font-size: 12px;
+      }
+
+      header {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        background: rgba(238, 242, 247, 0.76);
+        border-bottom: 1px solid var(--line);
+        backdrop-filter: blur(22px) saturate(150%);
+        -webkit-backdrop-filter: blur(22px) saturate(150%);
+      }
+
+      @media (prefers-color-scheme: dark) {
+        header {
+          background: rgba(17, 21, 28, 0.78);
+        }
+      }
+
+      .topbar {
+        min-height: 68px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+      }
+
+      .top-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      main {
+        padding: 16px 0 36px;
+        display: grid;
+        gap: 14px;
+      }
+
+      .filters {
+        display: grid;
+        grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) minmax(130px, 0.55fr) auto;
+        gap: 10px;
+        padding: 14px;
+        align-items: end;
+      }
+
+      .summary {
+        display: grid;
+        grid-template-columns: repeat(7, minmax(0, 1fr));
+        overflow: hidden;
+      }
+
+      .metric {
+        min-width: 0;
+        padding: 14px;
+        border-right: 1px solid var(--line);
+      }
+
+      .metric:last-child {
+        border-right: 0;
+      }
+
+      .metric span {
+        display: block;
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .metric strong {
+        display: block;
+        margin-top: 7px;
+        font-size: 19px;
+        overflow-wrap: anywhere;
+      }
+
+      .section {
+        overflow: hidden;
+      }
+
+      .section-head {
+        min-height: 52px;
+        padding: 12px 14px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .section-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        min-height: 22px;
+        padding: 2px 7px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        color: var(--muted);
+        background: var(--panel-strong);
+        font-size: 11px;
+        white-space: nowrap;
+      }
+
+      .pill.success {
+        color: var(--accent);
+        border-color: var(--accent);
+        background: var(--accent-soft);
+      }
+
+      .pill.error {
+        color: var(--danger);
+      }
+
+      .pill.warn {
+        color: var(--warning);
+      }
+
+      .models {
+        padding: 14px;
+        display: grid;
+        gap: 9px;
+      }
+
+      .model-row {
+        display: grid;
+        grid-template-columns: minmax(120px, 0.8fr) minmax(160px, 2fr) 90px 120px;
+        align-items: center;
+        gap: 12px;
+        font-size: 12px;
+      }
+
+      .model-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-weight: 650;
+      }
+
+      .bar {
+        height: 8px;
+        overflow: hidden;
+        border-radius: 4px;
+        background: var(--line);
+      }
+
+      .bar > span {
+        display: block;
+        height: 100%;
+        background: var(--accent);
+        border-radius: inherit;
+      }
+
+      .num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .table-wrap {
+        overflow: auto;
+      }
+
+      table {
+        width: 100%;
+        min-width: 980px;
+        border-collapse: collapse;
+        font-size: 12px;
+      }
+
+      th,
+      td {
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--line);
+        text-align: left;
+        white-space: nowrap;
+      }
+
+      th {
+        position: sticky;
+        top: 0;
+        color: var(--muted);
+        background: var(--panel-strong);
+        font-weight: 600;
+      }
+
+      tbody tr:last-child td {
+        border-bottom: 0;
+      }
+
+      .empty {
+        padding: 28px;
+        color: var(--muted);
+        text-align: center;
+      }
+
+      .pagination {
+        padding: 10px 14px;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+        border-top: 1px solid var(--line);
+      }
+
+      .pagination button {
+        height: 30px;
+        padding: 0 10px;
+      }
+
+      @media (max-width: 980px) {
+        .summary {
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+
+        .metric:nth-child(4) {
+          border-right: 0;
+        }
+
+        .filters {
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+
+      @media (max-width: 640px) {
+        .shell {
+          width: min(100vw - 18px, 1440px);
+        }
+
+        .topbar {
+          align-items: flex-start;
+          padding: 12px 0;
+        }
+
+        .filters,
+        .summary {
+          grid-template-columns: 1fr;
+        }
+
+        .metric {
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+        }
+
+        .metric:last-child {
+          border-bottom: 0;
+        }
+
+        .model-row {
+          grid-template-columns: minmax(100px, 1fr) 90px 100px;
+        }
+
+        .model-row .bar {
+          display: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <section id="loginView" class="login-view">
+      <div class="login-panel glass">
+        <div>
+          <h1>API Key 使用查询</h1>
+          <p class="muted">输入你的 New API Key</p>
+        </div>
+        <form id="loginForm" class="login-form">
+          <label>
+            API Key
+            <input id="keyInput" type="password" placeholder="sk-..." autocomplete="off" spellcheck="false" required />
+          </label>
+          <button id="loginButton" type="submit">查询</button>
+          <div id="loginError" class="login-error"></div>
+        </form>
+      </div>
+    </section>
+
+    <div id="usageView" class="hidden">
+      <header>
+        <div class="shell topbar">
+          <div>
+            <h1>我的使用情况</h1>
+            <p id="keyMeta" class="muted">-</p>
+          </div>
+          <div class="top-actions">
+            <span id="status" class="pill">连接中</span>
+            <button id="logout" class="secondary" type="button">退出</button>
+          </div>
+        </div>
+      </header>
+
+      <main class="shell">
+        <section class="filters glass">
+          <label>
+            开始时间
+            <input id="start" type="datetime-local" />
+          </label>
+          <label>
+            结束时间
+            <input id="end" type="datetime-local" />
+          </label>
+          <label>
+            日志状态
+            <select id="logType">
+              <option value="">全部</option>
+              <option value="success">成功</option>
+              <option value="error">错误</option>
+            </select>
+          </label>
+          <button id="refresh" type="button">刷新</button>
+        </section>
+
+        <section id="summary" class="summary glass"></section>
+
+        <section class="section glass">
+          <div class="section-head">
+            <div>
+              <h2>模型分布</h2>
+              <p class="muted">按总 Tokens 排列</p>
+            </div>
+            <span id="modelMeta" class="pill">0 模型</span>
+          </div>
+          <div id="models" class="models"></div>
+        </section>
+
+        <section class="section glass">
+          <div class="section-head">
+            <div>
+              <h2>使用日志</h2>
+              <p class="muted">仅展示计量与状态信息</p>
+            </div>
+            <div class="section-actions">
+              <label>
+                模型
+                <select id="logModel"><option value="">全部模型</option></select>
+              </label>
+              <span id="logMeta" class="pill">0 条</span>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>时间</th>
+                  <th>状态</th>
+                  <th>模型</th>
+                  <th class="num">输入</th>
+                  <th class="num">输出</th>
+                  <th class="num">缓存读</th>
+                  <th class="num">缓存写</th>
+                  <th class="num">总 Tokens</th>
+                  <th class="num">费用</th>
+                  <th class="num">耗时</th>
+                  <th>渠道</th>
+                </tr>
+              </thead>
+              <tbody id="logsBody"></tbody>
+            </table>
+          </div>
+          <div class="pagination">
+            <button id="prevPage" class="secondary" type="button">上一页</button>
+            <span id="pageInfo" class="pill">1 / 1</span>
+            <button id="nextPage" class="secondary" type="button">下一页</button>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script>
+      const state = {
+        key: "",
+        page: 1,
+        pageSize: 50,
+        models: [],
+      };
+
+      const el = (id) => document.getElementById(id);
+      const fmt = new Intl.NumberFormat("zh-CN");
+
+      function escapeHtml(value) {
+        return String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+
+      function formatCNY(value) {
+        const amount = Number(value || 0);
+        const digits = Math.abs(amount) >= 0.01 ? 2 : 6;
+        return `¥${amount.toFixed(digits)}`;
+      }
+
+      function tsToText(ts) {
+        if (!ts) return "-";
+        return new Date(ts * 1000).toLocaleString("zh-CN", { hour12: false });
+      }
+
+      function unixToDateValue(ts) {
+        const date = new Date(ts * 1000);
+        const offset = date.getTimezoneOffset() * 60 * 1000;
+        return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+      }
+
+      function dateValueToUnix(value) {
+        const ms = new Date(value).getTime();
+        return Number.isFinite(ms) ? Math.floor(ms / 1000) : "";
+      }
+
+      function setDefaultRange() {
+        const now = Math.floor(Date.now() / 1000);
+        el("start").value = unixToDateValue(now - 24 * 60 * 60);
+        el("end").value = unixToDateValue(now + 60 * 60);
+      }
+
+      function rangeParams() {
+        const params = new URLSearchParams();
+        const start = dateValueToUnix(el("start").value);
+        const end = dateValueToUnix(el("end").value);
+        if (start) params.set("start", start);
+        if (end) params.set("end", end);
+        return params;
+      }
+
+      async function selfAPI(path, params = new URLSearchParams()) {
+        const query = params.toString();
+        const response = await fetch(query ? `${path}?${query}` : path, {
+          headers: { Authorization: `Bearer ${state.key}` },
+          cache: "no-store",
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          if (response.status === 401) showLogin("API Key 已失效");
+          throw new Error(data?.error?.message || response.statusText);
+        }
+        return data;
+      }
+
+      function showLogin(message = "") {
+        state.key = "";
+        el("usageView").classList.add("hidden");
+        el("loginView").classList.remove("hidden");
+        el("loginError").textContent = message;
+        el("keyInput").value = "";
+        el("keyInput").focus();
+      }
+
+      function showUsage(profile) {
+        el("loginView").classList.add("hidden");
+        el("usageView").classList.remove("hidden");
+        const name = profile.key_name || "未命名 Key";
+        const tail = profile.key_tail ? ` · 尾号 ${profile.key_tail}` : "";
+        el("keyMeta").textContent = `${name}${tail}`;
+      }
+
+      async function login(key) {
+        const response = await fetch("/api/self/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key }),
+          cache: "no-store",
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data?.error?.message || "API Key 无效");
+        state.key = key;
+        showUsage(data);
+        await loadAll();
+      }
+
+      function renderSummary(data) {
+        const metrics = [
+          ["请求", data.request_count],
+          ["成功", data.success_count],
+          ["错误", data.error_count],
+          ["模型", data.model_count],
+          ["输入 Tokens", data.input_tokens],
+          ["输出 Tokens", data.output_tokens],
+          ["费用", formatCNY(data.quota_cny), true],
+        ];
+        el("summary").innerHTML = metrics
+          .map(([label, value, formatted]) => `<div class="metric"><span>${label}</span><strong>${formatted ? value : fmt.format(value || 0)}</strong></div>`)
+          .join("");
+      }
+
+      function renderModels(items) {
+        state.models = items || [];
+        el("modelMeta").textContent = `${fmt.format(state.models.length)} 模型`;
+        const selected = el("logModel").value;
+        el("logModel").innerHTML = `<option value="">全部模型</option>${state.models
+          .map((item) => `<option value="${escapeHtml(item.model_name)}">${escapeHtml(item.model_name)}</option>`)
+          .join("")}`;
+        if (state.models.some((item) => item.model_name === selected)) el("logModel").value = selected;
+        if (!state.models.length) {
+          el("models").innerHTML = `<div class="empty">没有数据</div>`;
+          return;
+        }
+        const maxTokens = Math.max(...state.models.map((item) => Number(item.total_tokens || 0)), 1);
+        el("models").innerHTML = state.models
+          .map((item) => {
+            const width = Math.max(2, (Number(item.total_tokens || 0) / maxTokens) * 100);
+            return `
+              <div class="model-row">
+                <span class="model-name" title="${escapeHtml(item.model_name)}">${escapeHtml(item.model_name || "unknown")}</span>
+                <span class="bar"><span style="width:${width}%"></span></span>
+                <span class="num">${fmt.format(item.request_count || 0)} 次</span>
+                <span class="num">${fmt.format(item.total_tokens || 0)}</span>
+              </div>
+            `;
+          })
+          .join("");
+      }
+
+      function renderLogs(data) {
+        const totalPages = Math.max(1, Math.ceil((data.total || 0) / data.page_size));
+        el("logMeta").textContent = `${fmt.format(data.total || 0)} 条`;
+        el("pageInfo").textContent = `${data.page} / ${totalPages}`;
+        el("prevPage").disabled = data.page <= 1;
+        el("nextPage").disabled = data.page >= totalPages;
+        if (!data.items?.length) {
+          el("logsBody").innerHTML = `<tr><td colspan="11" class="empty">没有数据</td></tr>`;
+          return;
+        }
+        el("logsBody").innerHTML = data.items
+          .map((item) => {
+            const status = item.type === 5 ? `<span class="pill error">错误</span>` : `<span class="pill success">成功</span>`;
+            return `
+              <tr>
+                <td>${tsToText(item.created_at)}</td>
+                <td>${status}</td>
+                <td>${escapeHtml(item.model_name || "")}</td>
+                <td class="num">${fmt.format(item.input_tokens || 0)}</td>
+                <td class="num">${fmt.format(item.output_tokens || 0)}</td>
+                <td class="num">${fmt.format(item.cache_read_tokens || 0)}</td>
+                <td class="num">${fmt.format(item.cache_write_tokens || 0)}</td>
+                <td class="num">${fmt.format(item.total_tokens || 0)}</td>
+                <td class="num">${formatCNY(item.quota_cny)}</td>
+                <td class="num">${fmt.format(item.use_time || 0)} ms</td>
+                <td>${escapeHtml(item.channel_name || "")}</td>
+              </tr>
+            `;
+          })
+          .join("");
+      }
+
+      async function loadLogs() {
+        const params = rangeParams();
+        const model = el("logModel").value;
+        if (model) params.set("model", model);
+        const type = el("logType").value;
+        if (type) params.set("type", type);
+        params.set("page", state.page);
+        params.set("page_size", state.pageSize);
+        renderLogs(await selfAPI("/api/self/logs", params));
+      }
+
+      async function loadAll() {
+        el("status").textContent = "加载中";
+        el("status").className = "pill";
+        const params = rangeParams();
+        const modelParams = new URLSearchParams(params);
+        modelParams.set("limit", "100");
+        try {
+          const [summary, models] = await Promise.all([
+            selfAPI("/api/self/summary", params),
+            selfAPI("/api/self/models", modelParams),
+          ]);
+          renderSummary(summary);
+          renderModels(models);
+          state.page = 1;
+          await loadLogs();
+          el("status").textContent = "已连接";
+          el("status").className = "pill success";
+        } catch (error) {
+          el("status").textContent = "加载失败";
+          el("status").className = "pill error";
+          throw error;
+        }
+      }
+
+      el("loginForm").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const key = el("keyInput").value.trim();
+        if (!key) return;
+        el("loginButton").disabled = true;
+        el("loginError").textContent = "";
+        try {
+          await login(key);
+          el("keyInput").value = "";
+        } catch (error) {
+          showLogin(error.message || "查询失败");
+        } finally {
+          el("loginButton").disabled = false;
+        }
+      });
+
+      el("logout").addEventListener("click", () => showLogin());
+      el("refresh").addEventListener("click", () => loadAll().catch((error) => alert(error.message)));
+      el("logType").addEventListener("change", () => {
+        state.page = 1;
+        loadLogs().catch((error) => alert(error.message));
+      });
+      el("logModel").addEventListener("change", () => {
+        state.page = 1;
+        loadLogs().catch((error) => alert(error.message));
+      });
+      el("prevPage").addEventListener("click", () => {
+        if (state.page <= 1) return;
+        state.page -= 1;
+        loadLogs().catch((error) => alert(error.message));
+      });
+      el("nextPage").addEventListener("click", () => {
+        state.page += 1;
+        loadLogs().catch((error) => alert(error.message));
+      });
+
+      setDefaultRange();
+      showLogin();
+    </script>
+  </body>
+</html>

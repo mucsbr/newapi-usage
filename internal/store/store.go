@@ -55,10 +55,28 @@ func (s *Store) Ping(ctx context.Context) error {
 }
 
 func (s *Store) Summary(ctx context.Context, tr TimeRange) (Summary, error) {
+	return s.summary(ctx, tr, 0)
+}
+
+func (s *Store) TokenSummary(ctx context.Context, tr TimeRange, tokenID int64) (Summary, error) {
+	if tokenID <= 0 {
+		return Summary{}, fmt.Errorf("invalid token id")
+	}
+	return s.summary(ctx, tr, tokenID)
+}
+
+func (s *Store) summary(ctx context.Context, tr TimeRange, tokenID int64) (Summary, error) {
 	ctx, cancel := s.context(ctx)
 	defer cancel()
 
-	where, args := s.where("l", tr, "")
+	first := ""
+	args := make([]any, 0, 3)
+	if tokenID > 0 {
+		first = "l.token_id = " + s.placeholder(1)
+		args = append(args, tokenID)
+	}
+	where, timeArgs := s.where("l", tr, first)
+	args = append(args, timeArgs...)
 	query := fmt.Sprintf(`
 		SELECT
 			COUNT(*) AS request_count,

@@ -15,6 +15,9 @@ func TestAuthMiddlewareLoginAndLogout(t *testing.T) {
 	s.mux.HandleFunc("/api/auth/status", s.handleAuthStatus)
 	s.mux.HandleFunc("/api/auth/login", s.handleAuthLogin)
 	s.mux.HandleFunc("/api/auth/logout", s.handleAuthLogout)
+	s.mux.HandleFunc("/api/self/ping", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	})
 	handler := s.Handler()
 
 	status := request(t, handler, http.MethodGet, "/api/auth/status", "")
@@ -25,6 +28,10 @@ func TestAuthMiddlewareLoginAndLogout(t *testing.T) {
 	protected := request(t, handler, http.MethodGet, "/api/summary", "")
 	if protected.Code != http.StatusUnauthorized {
 		t.Fatalf("protected code = %d, want 401", protected.Code)
+	}
+	selfPublic := request(t, handler, http.MethodGet, "/api/self/ping", "")
+	if selfPublic.Code != http.StatusOK {
+		t.Fatalf("self api code = %d, want 200", selfPublic.Code)
 	}
 
 	login := request(t, handler, http.MethodPost, "/api/auth/login", `{"password":"secret"}`)

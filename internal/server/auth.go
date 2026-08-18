@@ -35,6 +35,9 @@ func (s *Server) isPublicPath(path string) bool {
 	if path == "/api/health" || path == "/api/auth/status" || path == "/api/auth/login" || path == "/api/auth/logout" {
 		return true
 	}
+	if strings.HasPrefix(path, "/api/self/") {
+		return true
+	}
 	return !strings.HasPrefix(path, "/api/")
 }
 

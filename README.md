@@ -203,6 +203,21 @@ DELETE /api/channels/xfyun/accounts/{account_id}
 
 Time parameters are Unix timestamps in seconds.
 
+## Self-Service Usage Page
+
+Open `/self.html` and enter a New API key to view only that key's summary, model distribution, and metering logs. The key is matched directly against `tokens.key`, is kept only in the current browser page memory, and is never placed in a URL or returned by the API.
+
+Self-service log responses deliberately omit request bodies, audit conversations, request IDs, IP addresses, user agents, and raw log metadata. The admin-only audit endpoint remains inaccessible without the management session.
+
+```text
+POST /api/self/login
+GET /api/self/summary
+GET /api/self/models
+GET /api/self/logs
+```
+
+The three GET endpoints accept the key in `Authorization: Bearer sk-...` or `X-API-Key`.
+
 If the compose network name is different, check it with:
 
 ```bash

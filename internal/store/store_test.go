@@ -71,6 +71,13 @@ func TestStoreQueries(t *testing.T) {
 	if summary.RequestCount != 3 || summary.InputTokens != 25 || summary.OutputTokens != 45 {
 		t.Fatalf("unexpected summary: %+v", summary)
 	}
+	tokenSummary, err := s.TokenSummary(context.Background(), TimeRange{}, 1)
+	if err != nil {
+		t.Fatalf("token summary: %v", err)
+	}
+	if tokenSummary.RequestCount != 2 || tokenSummary.InputTokens != 25 || tokenSummary.OutputTokens != 45 || tokenSummary.ModelCount != 2 {
+		t.Fatalf("unexpected token summary: %+v", tokenSummary)
+	}
 
 	keys, err := s.KeyUsage(context.Background(), KeyFilter{Limit: 10})
 	if err != nil {

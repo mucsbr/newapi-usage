@@ -912,6 +912,16 @@
         gap: 12px;
       }
 
+      .login-form a {
+        color: var(--muted);
+        text-align: center;
+        text-decoration: none;
+      }
+
+      .login-form a:hover {
+        color: var(--accent);
+      }
+
       .login-error {
         min-height: 18px;
         color: var(--bad);
@@ -1078,6 +1088,7 @@
           </label>
           <button id="loginButton" type="submit">登录</button>
           <div id="loginError" class="login-error"></div>
+          <a href="/self.html" class="section-subtitle">使用 API Key 查询个人用量</a>
         </form>
       </div>
     </section>
