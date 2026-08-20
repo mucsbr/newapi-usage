@@ -147,6 +147,34 @@ func (m *Manager) CancelJob(ctx context.Context, id int64) (Job, error) {
 	return m.setJobStatus(ctx, id, StatusCanceled, []string{StatusQueued, StatusClaimed, StatusPlanning, StatusRunning, StatusPaused, StatusFailed})
 }
 
+func (m *Manager) DeleteJob(ctx context.Context, id int64) error {
+	tx, err := m.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	var status string
+	if err := tx.QueryRowContext(ctx, `SELECT status FROM review_jobs WHERE id = ?`, id).Scan(&status); err != nil {
+		tx.Rollback()
+		if err == sql.ErrNoRows {
+			return ErrNotFound
+		}
+		return err
+	}
+	if status != StatusCompleted && status != StatusCanceled && status != StatusFailed {
+		tx.Rollback()
+		return fmt.Errorf("active review job cannot be deleted")
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM review_job_entries WHERE job_id = ?`, id); err != nil {
+		tx.Rollback()
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM review_jobs WHERE id = ?`, id); err != nil {
+		tx.Rollback()
+		return err
+	}
+	return tx.Commit()
+}
+
 func (m *Manager) setJobStatus(ctx context.Context, id int64, status string, allowed []string) (Job, error) {
 	placeholders := sqlPlaceholders(len(allowed))
 	args := []any{status, status, time.Now().Unix(), id}

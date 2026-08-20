@@ -151,6 +151,16 @@ func TestReviewJobUsesMessageDeltasAndInheritsRisk(t *testing.T) {
 	if byEntry[4].EffectiveDecision != DecisionBlock || !byEntry[4].Inherited {
 		t.Fatalf("entry 4 should inherit block without a model call: %+v", byEntry[4])
 	}
+	if err := manager.DeleteJob(context.Background(), job.ID); err != nil {
+		t.Fatalf("delete completed job: %v", err)
+	}
+	if _, err := manager.Job(context.Background(), job.ID); err != ErrNotFound {
+		t.Fatalf("deleted job lookup error = %v, want ErrNotFound", err)
+	}
+	var cachedResults int
+	if err := manager.db.QueryRow(`SELECT COUNT(*) FROM review_results`).Scan(&cachedResults); err != nil || cachedResults == 0 {
+		t.Fatalf("review result cache should survive job deletion: count=%d err=%v", cachedResults, err)
+	}
 
 	db, err := sql.Open("sqlite", indexPath)
 	if err != nil {
@@ -292,6 +302,9 @@ func TestReviewManagerRunsIndependentJobsConcurrently(t *testing.T) {
 	jobB, err := manager.CreateJob(context.Background(), JobInput{TokenIDs: []int64{8}, Models: []string{"gpt-test"}, Start: 2000, End: 2000, RoleMode: RoleUser})
 	if err != nil {
 		t.Fatalf("create job B: %v", err)
+	}
+	if err := manager.DeleteJob(context.Background(), jobA.ID); err == nil {
+		t.Fatalf("queued job should not be deletable")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	manager.Start(ctx)

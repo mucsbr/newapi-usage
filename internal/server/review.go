@@ -151,6 +151,18 @@ func (s *Server) handleReviewJob(w http.ResponseWriter, r *http.Request) {
 		s.writeReviewJob(w, job, err)
 		return
 	}
+	if len(parts) == 1 && r.Method == http.MethodDelete {
+		if err := s.reviewer.DeleteJob(r.Context(), jobID); err != nil {
+			if errors.Is(err, review.ErrNotFound) {
+				writeError(w, http.StatusNotFound, err.Error())
+				return
+			}
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		return
+	}
 	if len(parts) != 2 {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return

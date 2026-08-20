@@ -238,6 +238,7 @@ GET /api/review/jobs/{job_id}
 POST /api/review/jobs/{job_id}/pause
 POST /api/review/jobs/{job_id}/resume
 POST /api/review/jobs/{job_id}/cancel
+DELETE /api/review/jobs/{job_id}
 GET /api/review/jobs/{job_id}/results
 ```
 
