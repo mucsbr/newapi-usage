@@ -433,6 +433,31 @@ func (s *Store) ResolveTokenByKey(key string) (TokenIdentity, error) {
 	return TokenIdentity{}, sql.ErrNoRows
 }
 
+func (s *Store) TokenOptions(ctx context.Context, limit int) ([]TokenOption, error) {
+	ctx, cancel := s.context(ctx)
+	defer cancel()
+	if limit <= 0 || limit > 2000 {
+		limit = 500
+	}
+	query := fmt.Sprintf(`SELECT id, COALESCE(name, ''), COALESCE(%s, '')
+		FROM tokens ORDER BY CASE WHEN COALESCE(name, '') = '' THEN 1 ELSE 0 END, name, id LIMIT %s`,
+		s.keyTailExpr("tokens"), s.placeholder(1))
+	rows, err := s.db.QueryContext(ctx, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]TokenOption, 0)
+	for rows.Next() {
+		var item TokenOption
+		if err := rows.Scan(&item.TokenID, &item.Name, &item.KeyTail); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (s *Store) context(ctx context.Context) (context.Context, context.CancelFunc) {
 	if ctx == nil {
 		ctx = context.Background()

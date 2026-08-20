@@ -230,6 +230,7 @@ The model is asked for a fixed JSON result using Chinese categories: 提示词�
 GET /api/review/config
 PUT /api/review/config
 POST /api/review/config/test
+GET /api/review/keys
 GET /api/review/jobs
 POST /api/review/jobs
 GET /api/review/jobs/{job_id}

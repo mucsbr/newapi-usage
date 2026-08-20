@@ -60,6 +60,22 @@ func (s *Server) handleReviewConfigTest(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, result)
 }
 
+func (s *Server) handleReviewKeys(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !s.reviewAvailable(w) {
+		return
+	}
+	items, err := s.store.TokenOptions(r.Context(), clampInt(queryInt(r, "limit", 500), 1, 2000))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
 func (s *Server) handleReviewJobs(w http.ResponseWriter, r *http.Request) {
 	if !s.reviewAvailable(w) {
 		return

@@ -149,6 +149,13 @@ func TestStoreQueries(t *testing.T) {
 	if token.TokenID != 1 || token.KeyTail != "34567890" {
 		t.Fatalf("unexpected resolved token: %+v", token)
 	}
+	options, err := s.TokenOptions(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("token options: %v", err)
+	}
+	if len(options) != 3 || options[0].Name != "busy-key" || options[0].KeyTail != "ests0000" {
+		t.Fatalf("unexpected token options: %+v", options)
+	}
 }
 
 func execMany(t *testing.T, db *sql.DB, statements []string) {
