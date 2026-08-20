@@ -18,7 +18,7 @@ func (m *Manager) Settings(ctx context.Context) (Settings, error) {
 	settings, err := m.loadSettings(ctx)
 	if err != nil {
 		if err == ErrNotConfigured {
-			return Settings{Policy: DefaultPolicy, ResponseMode: "auto"}, nil
+			return Settings{Policy: DefaultPolicy, ResponseMode: "auto", ReasoningEffort: ReasoningAuto}, nil
 		}
 		return Settings{}, err
 	}
@@ -45,13 +45,14 @@ func (m *Manager) SaveSettings(ctx context.Context, input SettingsInput) (Settin
 	if policy == "" {
 		policy = DefaultPolicy
 	}
+	reasoningEffort := normalizeReasoningEffort(input.ReasoningEffort)
 
 	apiKey := strings.TrimSpace(input.APIKey)
 	var cipherText []byte
 	keyTail := ""
 	responseMode := "auto"
 	if current, loadErr := m.loadSettings(ctx); loadErr == nil {
-		if current.BaseURL == baseURL && current.Model == model && current.Policy == policy {
+		if current.BaseURL == baseURL && current.Model == model && current.Policy == policy && current.ReasoningEffort == reasoningEffort {
 			responseMode = current.ResponseMode
 		}
 		if apiKey == "" {
@@ -68,8 +69,8 @@ func (m *Manager) SaveSettings(ctx context.Context, input SettingsInput) (Settin
 	keyTail = tail(apiKey, 6)
 	now := time.Now().Unix()
 	_, err = m.db.ExecContext(ctx, `INSERT INTO review_settings (
-		id, base_url, api_key_cipher, key_tail, model, policy, response_mode, updated_at
-	) VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+		id, base_url, api_key_cipher, key_tail, model, policy, response_mode, reasoning_effort, updated_at
+	) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(id) DO UPDATE SET
 		base_url = excluded.base_url,
 		api_key_cipher = excluded.api_key_cipher,
@@ -77,19 +78,21 @@ func (m *Manager) SaveSettings(ctx context.Context, input SettingsInput) (Settin
 		model = excluded.model,
 		policy = excluded.policy,
 		response_mode = excluded.response_mode,
+		reasoning_effort = excluded.reasoning_effort,
 		updated_at = excluded.updated_at`,
-		baseURL, cipherText, keyTail, model, policy, responseMode, now)
+		baseURL, cipherText, keyTail, model, policy, responseMode, reasoningEffort, now)
 	if err != nil {
 		return Settings{}, err
 	}
 	return Settings{
-		BaseURL:       baseURL,
-		Model:         model,
-		Policy:        policy,
-		ResponseMode:  responseMode,
-		KeyConfigured: true,
-		KeyTail:       keyTail,
-		UpdatedAt:     now,
+		BaseURL:         baseURL,
+		Model:           model,
+		Policy:          policy,
+		ResponseMode:    responseMode,
+		ReasoningEffort: reasoningEffort,
+		KeyConfigured:   true,
+		KeyTail:         keyTail,
+		UpdatedAt:       now,
 	}, nil
 }
 
@@ -98,27 +101,28 @@ func (m *Manager) TestSettings(ctx context.Context, input SettingsInput) (TestRe
 	if err != nil {
 		return TestResult{}, err
 	}
-	decision, usage, mode, err := m.callReview(ctx, settings, "这是一个用于测试审查接口连通性的普通文本。", "auto")
+	decision, usage, mode, effort, err := m.callReview(ctx, settings, "这是一个用于测试审查接口连通性的普通文本。", "auto")
 	if err != nil {
 		return TestResult{}, err
 	}
 	_ = usage
 	if stored, loadErr := m.loadSettings(ctx); loadErr == nil && stored.BaseURL == settings.BaseURL && stored.Model == settings.Model {
-		_, _ = m.db.ExecContext(ctx, `UPDATE review_settings SET response_mode = ?, updated_at = ? WHERE id = 1`, mode, time.Now().Unix())
+		_, _ = m.db.ExecContext(ctx, `UPDATE review_settings SET response_mode = ?, reasoning_effort = ?, updated_at = ? WHERE id = 1`, mode, effort, time.Now().Unix())
 	}
-	return TestResult{OK: true, ResponseMode: mode, Decision: decision}, nil
+	return TestResult{OK: true, ResponseMode: mode, ReasoningEffort: effort, Decision: decision}, nil
 }
 
 func (m *Manager) loadSettings(ctx context.Context) (storedSettings, error) {
 	var settings storedSettings
 	var cipherText []byte
-	err := m.db.QueryRowContext(ctx, `SELECT base_url, api_key_cipher, key_tail, model, policy, response_mode, updated_at FROM review_settings WHERE id = 1`).Scan(
+	err := m.db.QueryRowContext(ctx, `SELECT base_url, api_key_cipher, key_tail, model, policy, response_mode, reasoning_effort, updated_at FROM review_settings WHERE id = 1`).Scan(
 		&settings.BaseURL,
 		&cipherText,
 		&settings.KeyTail,
 		&settings.Model,
 		&settings.Policy,
 		&settings.ResponseMode,
+		&settings.ReasoningEffort,
 		&settings.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
@@ -141,6 +145,7 @@ func (m *Manager) loadSettings(ctx context.Context) (storedSettings, error) {
 	if settings.ResponseMode == "" {
 		settings.ResponseMode = "auto"
 	}
+	settings.ReasoningEffort = normalizeReasoningEffort(settings.ReasoningEffort)
 	return settings, nil
 }
 
@@ -170,10 +175,24 @@ func (m *Manager) settingsFromInput(ctx context.Context, input SettingsInput) (s
 	if policy == "" {
 		policy = DefaultPolicy
 	}
+	reasoningEffort := strings.TrimSpace(input.ReasoningEffort)
+	if reasoningEffort == "" {
+		reasoningEffort = current.ReasoningEffort
+	}
+	reasoningEffort = normalizeReasoningEffort(reasoningEffort)
 	if model == "" || apiKey == "" {
 		return storedSettings{}, ErrNotConfigured
 	}
-	return storedSettings{Settings: Settings{BaseURL: normalized, Model: model, Policy: policy}, APIKey: apiKey}, nil
+	return storedSettings{Settings: Settings{BaseURL: normalized, Model: model, Policy: policy, ReasoningEffort: reasoningEffort}, APIKey: apiKey}, nil
+}
+
+func normalizeReasoningEffort(value string) string {
+	switch strings.TrimSpace(value) {
+	case ReasoningOmit, ReasoningNoThink, ReasoningLow, ReasoningHigh:
+		return strings.TrimSpace(value)
+	default:
+		return ReasoningAuto
+	}
 }
 
 func normalizeBaseURL(value string) (string, error) {

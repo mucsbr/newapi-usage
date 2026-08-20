@@ -62,11 +62,16 @@ func (m *Manager) runNextJob(ctx context.Context) error {
 		m.failJob(context.Background(), job.ID, err)
 		return err
 	}
-	configHash := reviewConfigHash(settings)
-	if job.ConfigHash != "" && job.ConfigHash != configHash {
+	currentConfigHash := reviewConfigHash(settings)
+	legacyConfigHash := legacyReviewConfigHash(settings)
+	if job.ConfigHash != "" && job.ConfigHash != currentConfigHash && job.ConfigHash != legacyConfigHash {
 		err := fmt.Errorf("review configuration changed after job creation")
 		m.failJob(context.Background(), job.ID, err)
 		return err
+	}
+	configHash := job.ConfigHash
+	if configHash == "" {
+		configHash = currentConfigHash
 	}
 	slog.Info("review job started", "job_id", job.ID, "model", settings.Model, "role_mode", job.RoleMode)
 	for {
@@ -91,7 +96,7 @@ func (m *Manager) runNextJob(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if err := m.processEntry(ctx, job, entry, settings, configHash); err != nil {
+		if err := m.processEntry(ctx, job, entry, &settings, configHash); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				m.failJob(context.Background(), job.ID, err)
 			}
@@ -121,7 +126,7 @@ func (m *Manager) nextWorkEntry(ctx context.Context, jobID int64) (workEntry, er
 	return entry, err
 }
 
-func (m *Manager) processEntry(ctx context.Context, job Job, entry workEntry, settings storedSettings, configHash string) error {
+func (m *Manager) processEntry(ctx context.Context, job Job, entry workEntry, settings *storedSettings, configHash string) error {
 	parentDecision, parentScore, parentResultID := m.parentEffective(ctx, job.ID, entry.ParentEntryID)
 	delta := Decision{Decision: DecisionPass, Categories: []string{}}
 	resultID := int64(0)
@@ -259,14 +264,17 @@ func (m *Manager) storeResult(ctx context.Context, hash, configHash string, deci
 	return id, err
 }
 
-func (m *Manager) callReviewWithRetry(ctx context.Context, settings storedSettings, content string) (Decision, tokenUsage, error) {
+func (m *Manager) callReviewWithRetry(ctx context.Context, settings *storedSettings, content string) (Decision, tokenUsage, error) {
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
-		decision, usage, mode, err := m.callReview(ctx, settings, content, settings.ResponseMode)
+		decision, usage, mode, effort, err := m.callReview(ctx, *settings, content, settings.ResponseMode)
 		if err == nil {
 			if settings.ResponseMode == "auto" && mode != "" {
 				_, _ = m.db.ExecContext(ctx, `UPDATE review_settings SET response_mode = ?, updated_at = ? WHERE id = 1`, mode, time.Now().Unix())
 				settings.ResponseMode = mode
+			}
+			if settings.ReasoningEffort == ReasoningAuto && effort != "" {
+				settings.ReasoningEffort = effort
 			}
 			return decision, usage, nil
 		}
@@ -311,6 +319,12 @@ func retryAfterDelay(value string, fallback time.Duration) time.Duration {
 }
 
 func reviewConfigHash(settings storedSettings) string {
+	value := strings.Join([]string{settings.BaseURL, settings.Model, settings.Policy, normalizeReasoningEffort(settings.ReasoningEffort), "schema-v2"}, "\x00")
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
+}
+
+func legacyReviewConfigHash(settings storedSettings) string {
 	value := strings.Join([]string{settings.BaseURL, settings.Model, settings.Policy, "schema-v1"}, "\x00")
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])

@@ -18,6 +18,12 @@ const (
 	DecisionPass   = "通过"
 	DecisionReview = "复核"
 	DecisionBlock  = "阻断"
+
+	ReasoningAuto    = "auto"
+	ReasoningOmit    = "omit"
+	ReasoningNoThink = "no_think"
+	ReasoningLow     = "low"
+	ReasoningHigh    = "high"
 )
 
 var RiskCategories = []string{
@@ -53,26 +59,29 @@ type Config struct {
 }
 
 type SettingsInput struct {
-	BaseURL string `json:"base_url"`
-	APIKey  string `json:"api_key"`
-	Model   string `json:"model"`
-	Policy  string `json:"policy"`
+	BaseURL         string `json:"base_url"`
+	APIKey          string `json:"api_key"`
+	Model           string `json:"model"`
+	Policy          string `json:"policy"`
+	ReasoningEffort string `json:"reasoning_effort"`
 }
 
 type Settings struct {
-	BaseURL       string `json:"base_url"`
-	Model         string `json:"model"`
-	Policy        string `json:"policy"`
-	ResponseMode  string `json:"response_mode"`
-	KeyConfigured bool   `json:"key_configured"`
-	KeyTail       string `json:"key_tail,omitempty"`
-	UpdatedAt     int64  `json:"updated_at"`
+	BaseURL         string `json:"base_url"`
+	Model           string `json:"model"`
+	Policy          string `json:"policy"`
+	ResponseMode    string `json:"response_mode"`
+	ReasoningEffort string `json:"reasoning_effort"`
+	KeyConfigured   bool   `json:"key_configured"`
+	KeyTail         string `json:"key_tail,omitempty"`
+	UpdatedAt       int64  `json:"updated_at"`
 }
 
 type TestResult struct {
-	OK           bool     `json:"ok"`
-	ResponseMode string   `json:"response_mode"`
-	Decision     Decision `json:"decision"`
+	OK              bool     `json:"ok"`
+	ResponseMode    string   `json:"response_mode"`
+	ReasoningEffort string   `json:"reasoning_effort"`
+	Decision        Decision `json:"decision"`
 }
 
 type JobInput struct {
@@ -89,6 +98,7 @@ type Job struct {
 	End              int64   `json:"end"`
 	RoleMode         string  `json:"role_mode"`
 	ReviewModel      string  `json:"review_model"`
+	ReasoningEffort  string  `json:"reasoning_effort"`
 	ConfigHash       string  `json:"-"`
 	Status           string  `json:"status"`
 	MaxEntryID       int64   `json:"max_entry_id"`

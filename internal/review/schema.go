@@ -1,6 +1,9 @@
 package review
 
-import "context"
+import (
+	"context"
+	"fmt"
+)
 
 func (m *Manager) initSchema(ctx context.Context) error {
 	statements := []string{
@@ -14,6 +17,7 @@ func (m *Manager) initSchema(ctx context.Context) error {
 			model TEXT NOT NULL DEFAULT '',
 			policy TEXT NOT NULL DEFAULT '',
 			response_mode TEXT NOT NULL DEFAULT 'auto',
+			reasoning_effort TEXT NOT NULL DEFAULT 'auto',
 			updated_at INTEGER NOT NULL DEFAULT 0
 		)`,
 		`CREATE TABLE IF NOT EXISTS review_jobs (
@@ -23,6 +27,7 @@ func (m *Manager) initSchema(ctx context.Context) error {
 			end_at INTEGER NOT NULL,
 			role_mode TEXT NOT NULL DEFAULT 'user',
 			review_model TEXT NOT NULL DEFAULT '',
+			reasoning_effort TEXT NOT NULL DEFAULT 'auto',
 			config_hash TEXT NOT NULL DEFAULT '',
 			status TEXT NOT NULL DEFAULT 'queued',
 			max_entry_id INTEGER NOT NULL DEFAULT 0,
@@ -93,5 +98,46 @@ func (m *Manager) initSchema(ctx context.Context) error {
 			return err
 		}
 	}
+	for _, column := range []struct {
+		table      string
+		name       string
+		definition string
+	}{
+		{table: "review_settings", name: "reasoning_effort", definition: "TEXT NOT NULL DEFAULT 'auto'"},
+		{table: "review_jobs", name: "reasoning_effort", definition: "TEXT NOT NULL DEFAULT 'auto'"},
+	} {
+		if err := m.addColumnIfMissing(ctx, column.table, column.name, column.definition); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func (m *Manager) addColumnIfMissing(ctx context.Context, table, column, definition string) error {
+	rows, err := m.db.QueryContext(ctx, fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return err
+	}
+	found := false
+	for rows.Next() {
+		var cid int
+		var name, dataType string
+		var notNull, primaryKey int
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &primaryKey); err != nil {
+			rows.Close()
+			return err
+		}
+		if name == column {
+			found = true
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if found {
+		return nil
+	}
+	_, err = m.db.ExecContext(ctx, fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, definition))
+	return err
 }

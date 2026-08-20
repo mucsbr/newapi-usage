@@ -41,11 +41,11 @@ func (m *Manager) CreateJob(ctx context.Context, input JobInput) (Job, error) {
 	now := time.Now().Unix()
 	configHash := reviewConfigHash(settings)
 	result, err := m.db.ExecContext(ctx, `INSERT INTO review_jobs (
-		token_ids, start_at, end_at, role_mode, review_model, config_hash, status,
+		token_ids, start_at, end_at, role_mode, review_model, reasoning_effort, config_hash, status,
 		max_entry_id, total_entries, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		string(tokenJSON), input.Start, input.End, input.RoleMode, settings.Model,
-		configHash, StatusQueued, maxEntryID, totalEntries, now, now)
+		settings.ReasoningEffort, configHash, StatusQueued, maxEntryID, totalEntries, now, now)
 	if err != nil {
 		return Job{}, err
 	}
@@ -195,7 +195,7 @@ func (m *Manager) Results(ctx context.Context, jobID int64, filter ResultFilter)
 }
 
 func jobSelect() string {
-	return `SELECT id, token_ids, start_at, end_at, role_mode, review_model, config_hash, status, max_entry_id,
+	return `SELECT id, token_ids, start_at, end_at, role_mode, review_model, reasoning_effort, config_hash, status, max_entry_id,
 		total_entries, processed_entries, review_units, reviewed_units, cache_hits,
 		flagged_entries, error_entries, estimated_chars, prompt_tokens, completion_tokens,
 		error, created_at, started_at, completed_at, updated_at FROM review_jobs`
@@ -209,7 +209,7 @@ func scanJob(row rowScanner) (Job, error) {
 	var item Job
 	var tokenJSON string
 	err := row.Scan(
-		&item.ID, &tokenJSON, &item.Start, &item.End, &item.RoleMode, &item.ReviewModel, &item.ConfigHash, &item.Status,
+		&item.ID, &tokenJSON, &item.Start, &item.End, &item.RoleMode, &item.ReviewModel, &item.ReasoningEffort, &item.ConfigHash, &item.Status,
 		&item.MaxEntryID, &item.TotalEntries, &item.ProcessedEntries, &item.ReviewUnits,
 		&item.ReviewedUnits, &item.CacheHits, &item.FlaggedEntries, &item.ErrorEntries,
 		&item.EstimatedChars, &item.PromptTokens, &item.CompletionTokens, &item.Error,

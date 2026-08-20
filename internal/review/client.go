@@ -25,13 +25,25 @@ func (e *reviewHTTPError) Error() string {
 	return fmt.Sprintf("review http %d: %s", e.Status, e.Body)
 }
 
-func (m *Manager) callReview(ctx context.Context, settings storedSettings, content string, preferredMode string) (Decision, tokenUsage, string, error) {
+func (m *Manager) callReview(ctx context.Context, settings storedSettings, content string, preferredMode string) (Decision, tokenUsage, string, string, error) {
 	modes := reviewModes(preferredMode)
+	effort := normalizeReasoningEffort(settings.ReasoningEffort)
+	autoEffort := effort == ReasoningAuto
+	if autoEffort {
+		effort = ReasoningOmit
+	}
 	var lastErr error
 	for _, mode := range modes {
-		decision, usage, err := m.callReviewMode(ctx, settings, content, mode)
+		decision, usage, err := m.callReviewMode(ctx, settings, content, mode, effort)
 		if err == nil {
-			return decision, usage, mode, nil
+			return decision, usage, mode, effort, nil
+		}
+		if autoEffort && effort == ReasoningOmit && reasoningEffortRequired(err) {
+			effort = ReasoningNoThink
+			decision, usage, err = m.callReviewMode(ctx, settings, content, mode, effort)
+			if err == nil {
+				return decision, usage, mode, effort, nil
+			}
 		}
 		lastErr = err
 		var httpErr *reviewHTTPError
@@ -39,16 +51,19 @@ func (m *Manager) callReview(ctx context.Context, settings storedSettings, conte
 			break
 		}
 	}
-	return Decision{}, tokenUsage{}, "", lastErr
+	return Decision{}, tokenUsage{}, "", effort, lastErr
 }
 
-func (m *Manager) callReviewMode(ctx context.Context, settings storedSettings, content string, mode string) (Decision, tokenUsage, error) {
+func (m *Manager) callReviewMode(ctx context.Context, settings storedSettings, content string, mode, effort string) (Decision, tokenUsage, error) {
 	payload := map[string]any{
 		"model": settings.Model,
 		"messages": []map[string]string{
 			{"role": "system", "content": reviewSystemPrompt(settings.Policy)},
 			{"role": "user", "content": reviewUserPrompt(content)},
 		},
+	}
+	if effort != "" && effort != ReasoningAuto && effort != ReasoningOmit {
+		payload["reasoning_effort"] = effort
 	}
 	switch mode {
 	case "json_schema":
@@ -112,6 +127,16 @@ func (m *Manager) callReviewMode(ctx context.Context, settings storedSettings, c
 		return Decision{}, tokenUsage{}, err
 	}
 	return decision, tokenUsage{Prompt: envelope.Usage.PromptTokens, Completion: envelope.Usage.CompletionTokens}, nil
+}
+
+func reasoningEffortRequired(err error) bool {
+	var httpErr *reviewHTTPError
+	if !asHTTPError(err, &httpErr) || (httpErr.Status != http.StatusBadRequest && httpErr.Status != http.StatusUnprocessableEntity) {
+		return false
+	}
+	body := strings.ToLower(httpErr.Body)
+	return strings.Contains(body, "reasoning_effort") &&
+		(strings.Contains(body, "must be one of") || strings.Contains(body, "required") || strings.Contains(body, "invalid"))
 }
 
 func reviewModes(preferred string) []string {

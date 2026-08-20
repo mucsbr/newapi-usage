@@ -180,14 +180,42 @@ func TestReviewClientFallsBackToPlainJSON(t *testing.T) {
 	}))
 	defer server.Close()
 	manager := &Manager{client: server.Client()}
-	decision, _, mode, err := manager.callReview(context.Background(), storedSettings{
+	decision, _, mode, effort, err := manager.callReview(context.Background(), storedSettings{
 		Settings: Settings{BaseURL: server.URL + "/v1", Model: "test", Policy: DefaultPolicy},
 		APIKey:   "key",
 	}, "普通内容", "auto")
 	if err != nil {
 		t.Fatalf("call review: %v", err)
 	}
-	if mode != "plain" || decision.Decision != DecisionPass || calls != 3 {
-		t.Fatalf("mode=%q decision=%+v calls=%d", mode, decision, calls)
+	if mode != "plain" || effort != ReasoningOmit || decision.Decision != DecisionPass || calls != 3 {
+		t.Fatalf("mode=%q effort=%q decision=%+v calls=%d", mode, effort, decision, calls)
+	}
+}
+
+func TestReviewClientAutoDetectsRequiredReasoningEffort(t *testing.T) {
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		body, _ := io.ReadAll(r.Body)
+		var payload map[string]any
+		_ = json.Unmarshal(body, &payload)
+		if payload["reasoning_effort"] != ReasoningNoThink {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, `{"error":{"message":"reasoning_effort must be one of: no_think, low, high"}}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"{\"decision\":\"通过\",\"risk_score\":1,\"categories\":[],\"reason\":\"正常\",\"confidence\":0.99}"}}],"usage":{}}`)
+	}))
+	defer server.Close()
+	manager := &Manager{client: server.Client()}
+	decision, _, mode, effort, err := manager.callReview(context.Background(), storedSettings{
+		Settings: Settings{BaseURL: server.URL + "/v1", Model: "test", Policy: DefaultPolicy, ReasoningEffort: ReasoningAuto},
+		APIKey:   "key",
+	}, "普通内容", "auto")
+	if err != nil {
+		t.Fatalf("call review: %v", err)
+	}
+	if mode != "json_schema" || effort != ReasoningNoThink || decision.Decision != DecisionPass || calls != 2 {
+		t.Fatalf("mode=%q effort=%q decision=%+v calls=%d", mode, effort, decision, calls)
 	}
 }

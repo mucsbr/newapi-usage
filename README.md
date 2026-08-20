@@ -224,7 +224,7 @@ Administrators can open `/review.html` to configure an OpenAI-compatible Chat Co
 
 Review jobs compare each request's normalized message sequence with recent conversation branches. Only newly appended messages are sent to the review model, identical deltas reuse cached results, and an earlier risk is inherited while that message remains in the request history. The default mode reviews user messages only; user plus tool messages and all-message modes are also available.
 
-The model is asked for a fixed JSON result using Chinese categories: 提示词注入、越狱绕过、凭据窃取、敏感信息泄露、恶意软件、网络攻击、欺诈、隐私侵犯、违法活动、滥用骚扰、其他风险. The client tries strict JSON Schema first, then JSON Object mode, then plain JSON prompting for compatible gateways.
+The model is asked for a fixed JSON result using Chinese categories: 提示词注入、越狱绕过、凭据窃取、敏感信息泄露、恶意软件、网络攻击、欺诈、隐私侵犯、违法活动、滥用骚扰、其他风险. The client tries strict JSON Schema first, then JSON Object mode, then plain JSON prompting for compatible gateways. Reasoning effort can be omitted or set to `no_think`, `low`, or `high`; automatic mode retries with `no_think` when a provider explicitly requires that field.
 
 ```text
 GET /api/review/config
