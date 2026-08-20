@@ -240,6 +240,7 @@ POST /api/review/jobs/{job_id}/resume
 POST /api/review/jobs/{job_id}/cancel
 DELETE /api/review/jobs/{job_id}
 GET /api/review/jobs/{job_id}/results
+GET /api/review/entries/{audit_entry_id}
 ```
 
 If the compose network name is different, check it with:

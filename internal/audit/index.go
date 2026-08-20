@@ -381,6 +381,25 @@ func (i *Indexer) Status(ctx context.Context) (Status, error) {
 	return out, nil
 }
 
+func (i *Indexer) EntryByID(ctx context.Context, id int64) (Entry, error) {
+	if i == nil || id <= 0 {
+		return Entry{}, sql.ErrNoRows
+	}
+	rows, err := i.db.QueryContext(ctx, `SELECT `+entrySelectColumns("")+` FROM audit_entries WHERE id = ? LIMIT 1`, id)
+	if err != nil {
+		return Entry{}, err
+	}
+	defer rows.Close()
+	items, err := scanEntries(rows)
+	if err != nil {
+		return Entry{}, err
+	}
+	if len(items) == 0 {
+		return Entry{}, sql.ErrNoRows
+	}
+	return items[0], nil
+}
+
 func (i *Indexer) initSchema(ctx context.Context) error {
 	statements := []string{
 		`PRAGMA journal_mode=WAL`,

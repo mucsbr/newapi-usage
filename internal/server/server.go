@@ -65,6 +65,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/review/models", s.handleReviewModels)
 	s.mux.HandleFunc("/api/review/jobs", s.handleReviewJobs)
 	s.mux.HandleFunc("/api/review/jobs/", s.handleReviewJob)
+	s.mux.HandleFunc("/api/review/entries/", s.handleReviewEntry)
 	s.mux.HandleFunc("/api/channels/balance", s.handleChannelsBalance)
 	s.mux.HandleFunc("/api/channels/sub2api/accounts/", s.handleSub2APIUsage)
 	s.mux.HandleFunc("/api/channels/opencode/accounts/", s.handleOpenCodeUsage)

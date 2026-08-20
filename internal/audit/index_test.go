@@ -50,6 +50,13 @@ func TestIndexerIncrementalImport(t *testing.T) {
 	if items[0].Messages[0].Content != "hello" {
 		t.Fatalf("unexpected messages: %+v", items[0].Messages)
 	}
+	entry, err := idx.EntryByID(context.Background(), items[0].ID)
+	if err != nil {
+		t.Fatalf("entry by id: %v", err)
+	}
+	if entry.ID != items[0].ID || len(entry.Messages) != 1 || entry.Messages[0].Content != "hello" {
+		t.Fatalf("unexpected entry by id: %+v", entry)
+	}
 	var storedBody string
 	var compressedLen int
 	var bodyEncoding string

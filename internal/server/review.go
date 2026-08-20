@@ -200,6 +200,29 @@ func (s *Server) handleReviewJob(w http.ResponseWriter, r *http.Request) {
 	s.writeReviewJob(w, job, err)
 }
 
+func (s *Server) handleReviewEntry(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if s.audit == nil || !s.audit.Enabled() {
+		writeError(w, http.StatusServiceUnavailable, "audit is unavailable")
+		return
+	}
+	rawID := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/review/entries/"), "/")
+	entryID, err := strconv.ParseInt(rawID, 10, 64)
+	if err != nil || entryID <= 0 {
+		writeError(w, http.StatusBadRequest, "invalid audit entry id")
+		return
+	}
+	entry, err := s.audit.EntryByID(r.Context(), entryID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "audit entry not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, entry)
+}
+
 func (s *Server) writeReviewJob(w http.ResponseWriter, job review.Job, err error) {
 	if errors.Is(err, review.ErrNotFound) {
 		writeError(w, http.StatusNotFound, err.Error())
