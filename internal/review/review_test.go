@@ -27,6 +27,7 @@ func TestReviewJobUsesMessageDeltasAndInheritsRisk(t *testing.T) {
 		`{"time":1001,"path":"/v1/chat/completions","headers":{"authorization":"Bearer sk-test"},"body":{"model":"gpt-test","messages":[{"role":"user","content":"普通问题"},{"role":"assistant","content":"普通回答"},{"role":"user","content":"危险请求"}]}}`,
 		`{"time":1002,"path":"/v1/chat/completions","headers":{"authorization":"Bearer sk-test"},"body":{"model":"gpt-test","messages":[{"role":"user","content":"普通问题"},{"role":"assistant","content":"普通回答"},{"role":"user","content":"危险请求"},{"role":"assistant","content":"拒绝"},{"role":"user","content":"继续"}]}}`,
 		`{"time":1003,"path":"/v1/chat/completions","headers":{"authorization":"Bearer sk-test"},"body":{"model":"gpt-test","messages":[{"role":"user","content":"普通问题"},{"role":"assistant","content":"普通回答"},{"role":"user","content":"危险请求"},{"role":"assistant","content":"拒绝"},{"role":"user","content":"继续"}]}}`,
+		`{"time":1004,"path":"/v1/chat/completions","headers":{"authorization":"Bearer sk-test"},"body":{"model":"other-model","messages":[{"role":"user","content":"其他模型请求"}]}}`,
 	}
 	if err := os.WriteFile(logPath, []byte(strings.Join(lines, "\n")+"\n"), 0600); err != nil {
 		t.Fatalf("write audit log: %v", err)
@@ -86,7 +87,14 @@ func TestReviewJobUsesMessageDeltasAndInheritsRisk(t *testing.T) {
 	if err != nil || !settings.KeyConfigured {
 		t.Fatalf("save settings: settings=%+v err=%v", settings, err)
 	}
-	job, err := manager.CreateJob(context.Background(), JobInput{TokenIDs: []int64{7}, Start: 1000, End: 1003, RoleMode: RoleUser})
+	modelOptions, err := manager.ModelOptions(context.Background(), []int64{7}, 1000, 1004)
+	if err != nil {
+		t.Fatalf("model options: %v", err)
+	}
+	if len(modelOptions) != 2 || modelOptions[0].Model != "gpt-test" || modelOptions[0].RequestCount != 4 {
+		t.Fatalf("unexpected model options: %+v", modelOptions)
+	}
+	job, err := manager.CreateJob(context.Background(), JobInput{TokenIDs: []int64{7}, Models: []string{"gpt-test"}, Start: 1000, End: 1004, RoleMode: RoleUser})
 	if err != nil {
 		t.Fatalf("create job: %v", err)
 	}
@@ -99,6 +107,9 @@ func TestReviewJobUsesMessageDeltasAndInheritsRisk(t *testing.T) {
 	}
 	if job.Status != StatusCompleted || job.TotalEntries != 4 || job.ReviewUnits != 3 || job.ReviewedUnits != 3 {
 		t.Fatalf("unexpected job: %+v", job)
+	}
+	if len(job.Models) != 1 || job.Models[0] != "gpt-test" {
+		t.Fatalf("unexpected job models: %+v", job.Models)
 	}
 	mu.Lock()
 	gotContents := append([]string{}, contents...)

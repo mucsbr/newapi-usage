@@ -54,13 +54,13 @@ func (m *Manager) planJob(ctx context.Context, job Job) error {
 		if err := m.ensureJobActive(ctx, job.ID, StatusPlanning); err != nil {
 			return err
 		}
-		branches, err := m.loadAnchorBranches(ctx, tokenID, job.Start, job.MaxEntryID)
+		branches, err := m.loadAnchorBranches(ctx, tokenID, job.Start, job.MaxEntryID, job.Models)
 		if err != nil {
 			return err
 		}
 		cursorTime, cursorID := int64(0), int64(0)
 		for {
-			batch, err := m.loadAuditBatch(ctx, tokenID, job.Start, job.End, job.MaxEntryID, cursorTime, cursorID)
+			batch, err := m.loadAuditBatch(ctx, tokenID, job.Start, job.End, job.MaxEntryID, cursorTime, cursorID, job.Models)
 			if err != nil {
 				return err
 			}
@@ -99,10 +99,19 @@ func (m *Manager) planJob(ctx context.Context, job Job) error {
 	return err
 }
 
-func (m *Manager) loadAnchorBranches(ctx context.Context, tokenID, start, maxEntryID int64) ([]conversationBranch, error) {
+func (m *Manager) loadAnchorBranches(ctx context.Context, tokenID, start, maxEntryID int64, models []string) ([]conversationBranch, error) {
+	args := []any{tokenID, start, maxEntryID}
+	modelWhere := ""
+	if len(models) > 0 {
+		modelWhere = " AND model IN (" + sqlPlaceholders(len(models)) + ")"
+		for _, model := range models {
+			args = append(args, model)
+		}
+	}
+	args = append(args, anchorEntryLimit)
 	rows, err := m.db.QueryContext(ctx, `SELECT id, token_id, created_at, model, body, body_gzip, body_encoding
-		FROM audit_entries WHERE token_id = ? AND created_at < ? AND id <= ?
-		ORDER BY created_at DESC, id DESC LIMIT ?`, tokenID, start, maxEntryID, anchorEntryLimit)
+		FROM audit_entries WHERE token_id = ? AND created_at < ? AND id <= ?`+modelWhere+`
+		ORDER BY created_at DESC, id DESC LIMIT ?`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -124,13 +133,22 @@ func (m *Manager) loadAnchorBranches(ctx context.Context, tokenID, start, maxEnt
 	return branches, nil
 }
 
-func (m *Manager) loadAuditBatch(ctx context.Context, tokenID, start, end, maxEntryID, cursorTime, cursorID int64) ([]auditRequest, error) {
+func (m *Manager) loadAuditBatch(ctx context.Context, tokenID, start, end, maxEntryID, cursorTime, cursorID int64, models []string) ([]auditRequest, error) {
+	args := []any{tokenID, start, end, maxEntryID, cursorTime, cursorTime, cursorID}
+	modelWhere := ""
+	if len(models) > 0 {
+		modelWhere = " AND model IN (" + sqlPlaceholders(len(models)) + ")"
+		for _, model := range models {
+			args = append(args, model)
+		}
+	}
+	args = append(args, planBatchSize)
 	rows, err := m.db.QueryContext(ctx, `SELECT id, token_id, created_at, model, body, body_gzip, body_encoding
 		FROM audit_entries
 		WHERE token_id = ? AND created_at >= ? AND created_at <= ? AND id <= ?
-		AND (created_at > ? OR (created_at = ? AND id > ?))
+		AND (created_at > ? OR (created_at = ? AND id > ?))`+modelWhere+`
 		ORDER BY created_at, id LIMIT ?`,
-		tokenID, start, end, maxEntryID, cursorTime, cursorTime, cursorID, planBatchSize)
+		args...)
 	if err != nil {
 		return nil, err
 	}

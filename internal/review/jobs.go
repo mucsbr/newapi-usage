@@ -22,29 +22,42 @@ func (m *Manager) CreateJob(ctx context.Context, input JobInput) (Job, error) {
 	if len(input.TokenIDs) > 500 {
 		return Job{}, fmt.Errorf("too many keys")
 	}
+	input.Models = normalizeModels(input.Models)
+	if len(input.Models) == 0 {
+		return Job{}, fmt.Errorf("at least one request model is required")
+	}
+	if len(input.Models) > 500 {
+		return Job{}, fmt.Errorf("too many request models")
+	}
 	if input.Start <= 0 || input.End <= 0 || input.End < input.Start {
 		return Job{}, fmt.Errorf("invalid time range")
 	}
 	input.RoleMode = normalizeRoleMode(input.RoleMode)
 	placeholders := sqlPlaceholders(len(input.TokenIDs))
-	args := make([]any, 0, len(input.TokenIDs)+2)
+	args := make([]any, 0, len(input.TokenIDs)+len(input.Models)+2)
 	for _, tokenID := range input.TokenIDs {
 		args = append(args, tokenID)
 	}
 	args = append(args, input.Start, input.End)
-	query := fmt.Sprintf(`SELECT COALESCE(MAX(id), 0), COUNT(*) FROM audit_entries WHERE token_id IN (%s) AND created_at >= ? AND created_at <= ?`, placeholders)
+	for _, model := range input.Models {
+		args = append(args, model)
+	}
+	query := fmt.Sprintf(`SELECT COALESCE(MAX(id), 0), COUNT(*) FROM audit_entries
+		WHERE token_id IN (%s) AND created_at >= ? AND created_at <= ? AND model IN (%s)`,
+		placeholders, sqlPlaceholders(len(input.Models)))
 	var maxEntryID, totalEntries int64
 	if err := m.db.QueryRowContext(ctx, query, args...).Scan(&maxEntryID, &totalEntries); err != nil {
 		return Job{}, err
 	}
 	tokenJSON, _ := json.Marshal(input.TokenIDs)
+	modelJSON, _ := json.Marshal(input.Models)
 	now := time.Now().Unix()
 	configHash := reviewConfigHash(settings)
 	result, err := m.db.ExecContext(ctx, `INSERT INTO review_jobs (
-		token_ids, start_at, end_at, role_mode, review_model, reasoning_effort, config_hash, status,
+		token_ids, models, start_at, end_at, role_mode, review_model, reasoning_effort, config_hash, status,
 		max_entry_id, total_entries, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		string(tokenJSON), input.Start, input.End, input.RoleMode, settings.Model,
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		string(tokenJSON), string(modelJSON), input.Start, input.End, input.RoleMode, settings.Model,
 		settings.ReasoningEffort, configHash, StatusQueued, maxEntryID, totalEntries, now, now)
 	if err != nil {
 		return Job{}, err
@@ -55,6 +68,38 @@ func (m *Manager) CreateJob(ctx context.Context, input JobInput) (Job, error) {
 	}
 	m.notify()
 	return m.Job(ctx, id)
+}
+
+func (m *Manager) ModelOptions(ctx context.Context, tokenIDs []int64, start, end int64) ([]ModelOption, error) {
+	tokenIDs = normalizeTokenIDs(tokenIDs)
+	if len(tokenIDs) == 0 {
+		return []ModelOption{}, nil
+	}
+	if start <= 0 || end <= 0 || end < start {
+		return nil, fmt.Errorf("invalid time range")
+	}
+	args := make([]any, 0, len(tokenIDs)+2)
+	for _, tokenID := range tokenIDs {
+		args = append(args, tokenID)
+	}
+	args = append(args, start, end)
+	query := fmt.Sprintf(`SELECT model, COUNT(*) FROM audit_entries
+		WHERE token_id IN (%s) AND created_at >= ? AND created_at <= ? AND model <> ''
+		GROUP BY model ORDER BY COUNT(*) DESC, model LIMIT 500`, sqlPlaceholders(len(tokenIDs)))
+	rows, err := m.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]ModelOption, 0)
+	for rows.Next() {
+		var item ModelOption
+		if err := rows.Scan(&item.Model, &item.RequestCount); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
 }
 
 func (m *Manager) ListJobs(ctx context.Context, limit int) ([]Job, error) {
@@ -195,7 +240,7 @@ func (m *Manager) Results(ctx context.Context, jobID int64, filter ResultFilter)
 }
 
 func jobSelect() string {
-	return `SELECT id, token_ids, start_at, end_at, role_mode, review_model, reasoning_effort, config_hash, status, max_entry_id,
+	return `SELECT id, token_ids, models, start_at, end_at, role_mode, review_model, reasoning_effort, config_hash, status, max_entry_id,
 		total_entries, processed_entries, review_units, reviewed_units, cache_hits,
 		flagged_entries, error_entries, estimated_chars, prompt_tokens, completion_tokens,
 		error, created_at, started_at, completed_at, updated_at FROM review_jobs`
@@ -207,9 +252,9 @@ type rowScanner interface {
 
 func scanJob(row rowScanner) (Job, error) {
 	var item Job
-	var tokenJSON string
+	var tokenJSON, modelJSON string
 	err := row.Scan(
-		&item.ID, &tokenJSON, &item.Start, &item.End, &item.RoleMode, &item.ReviewModel, &item.ReasoningEffort, &item.ConfigHash, &item.Status,
+		&item.ID, &tokenJSON, &modelJSON, &item.Start, &item.End, &item.RoleMode, &item.ReviewModel, &item.ReasoningEffort, &item.ConfigHash, &item.Status,
 		&item.MaxEntryID, &item.TotalEntries, &item.ProcessedEntries, &item.ReviewUnits,
 		&item.ReviewedUnits, &item.CacheHits, &item.FlaggedEntries, &item.ErrorEntries,
 		&item.EstimatedChars, &item.PromptTokens, &item.CompletionTokens, &item.Error,
@@ -219,6 +264,7 @@ func scanJob(row rowScanner) (Job, error) {
 		return Job{}, err
 	}
 	_ = json.Unmarshal([]byte(tokenJSON), &item.TokenIDs)
+	_ = json.Unmarshal([]byte(modelJSON), &item.Models)
 	return item, nil
 }
 
@@ -232,6 +278,20 @@ func normalizeTokenIDs(values []int64) []int64 {
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
+}
+
+func normalizeModels(values []string) []string {
+	seen := make(map[string]bool)
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" && !seen[value] {
+			seen[value] = true
+			out = append(out, value)
+		}
+	}
+	sort.Strings(out)
 	return out
 }
 

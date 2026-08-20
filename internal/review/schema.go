@@ -23,6 +23,7 @@ func (m *Manager) initSchema(ctx context.Context) error {
 		`CREATE TABLE IF NOT EXISTS review_jobs (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			token_ids TEXT NOT NULL,
+			models TEXT NOT NULL DEFAULT '[]',
 			start_at INTEGER NOT NULL,
 			end_at INTEGER NOT NULL,
 			role_mode TEXT NOT NULL DEFAULT 'user',
@@ -105,6 +106,7 @@ func (m *Manager) initSchema(ctx context.Context) error {
 	}{
 		{table: "review_settings", name: "reasoning_effort", definition: "TEXT NOT NULL DEFAULT 'auto'"},
 		{table: "review_jobs", name: "reasoning_effort", definition: "TEXT NOT NULL DEFAULT 'auto'"},
+		{table: "review_jobs", name: "models", definition: "TEXT NOT NULL DEFAULT '[]'"},
 	} {
 		if err := m.addColumnIfMissing(ctx, column.table, column.name, column.definition); err != nil {
 			return err

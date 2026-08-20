@@ -85,38 +85,40 @@ type TestResult struct {
 }
 
 type JobInput struct {
-	TokenIDs []int64 `json:"token_ids"`
-	Start    int64   `json:"start"`
-	End      int64   `json:"end"`
-	RoleMode string  `json:"role_mode"`
+	TokenIDs []int64  `json:"token_ids"`
+	Models   []string `json:"models"`
+	Start    int64    `json:"start"`
+	End      int64    `json:"end"`
+	RoleMode string   `json:"role_mode"`
 }
 
 type Job struct {
-	ID               int64   `json:"id"`
-	TokenIDs         []int64 `json:"token_ids"`
-	Start            int64   `json:"start"`
-	End              int64   `json:"end"`
-	RoleMode         string  `json:"role_mode"`
-	ReviewModel      string  `json:"review_model"`
-	ReasoningEffort  string  `json:"reasoning_effort"`
-	ConfigHash       string  `json:"-"`
-	Status           string  `json:"status"`
-	MaxEntryID       int64   `json:"max_entry_id"`
-	TotalEntries     int64   `json:"total_entries"`
-	ProcessedEntries int64   `json:"processed_entries"`
-	ReviewUnits      int64   `json:"review_units"`
-	ReviewedUnits    int64   `json:"reviewed_units"`
-	CacheHits        int64   `json:"cache_hits"`
-	FlaggedEntries   int64   `json:"flagged_entries"`
-	ErrorEntries     int64   `json:"error_entries"`
-	EstimatedChars   int64   `json:"estimated_chars"`
-	PromptTokens     int64   `json:"prompt_tokens"`
-	CompletionTokens int64   `json:"completion_tokens"`
-	Error            string  `json:"error,omitempty"`
-	CreatedAt        int64   `json:"created_at"`
-	StartedAt        int64   `json:"started_at,omitempty"`
-	CompletedAt      int64   `json:"completed_at,omitempty"`
-	UpdatedAt        int64   `json:"updated_at"`
+	ID               int64    `json:"id"`
+	TokenIDs         []int64  `json:"token_ids"`
+	Models           []string `json:"models"`
+	Start            int64    `json:"start"`
+	End              int64    `json:"end"`
+	RoleMode         string   `json:"role_mode"`
+	ReviewModel      string   `json:"review_model"`
+	ReasoningEffort  string   `json:"reasoning_effort"`
+	ConfigHash       string   `json:"-"`
+	Status           string   `json:"status"`
+	MaxEntryID       int64    `json:"max_entry_id"`
+	TotalEntries     int64    `json:"total_entries"`
+	ProcessedEntries int64    `json:"processed_entries"`
+	ReviewUnits      int64    `json:"review_units"`
+	ReviewedUnits    int64    `json:"reviewed_units"`
+	CacheHits        int64    `json:"cache_hits"`
+	FlaggedEntries   int64    `json:"flagged_entries"`
+	ErrorEntries     int64    `json:"error_entries"`
+	EstimatedChars   int64    `json:"estimated_chars"`
+	PromptTokens     int64    `json:"prompt_tokens"`
+	CompletionTokens int64    `json:"completion_tokens"`
+	Error            string   `json:"error,omitempty"`
+	CreatedAt        int64    `json:"created_at"`
+	StartedAt        int64    `json:"started_at,omitempty"`
+	CompletedAt      int64    `json:"completed_at,omitempty"`
+	UpdatedAt        int64    `json:"updated_at"`
 }
 
 type Decision struct {
@@ -158,4 +160,9 @@ type ResultFilter struct {
 	TokenID  int64
 	Page     int
 	PageSize int
+}
+
+type ModelOption struct {
+	Model        string `json:"model"`
+	RequestCount int64  `json:"request_count"`
 }

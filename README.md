@@ -220,7 +220,7 @@ The three GET endpoints accept the key in `Authorization: Bearer sk-...` or `X-A
 
 ## AI Request Review
 
-Administrators can open `/review.html` to configure an OpenAI-compatible Chat Completions model and create background review jobs for selected keys and time ranges. The review API key is AES-GCM encrypted in the audit SQLite database; the local encryption key is generated next to the audit database with mode `0600`.
+Administrators can open `/review.html` to configure an OpenAI-compatible Chat Completions model and create background review jobs for selected keys, request models, and time ranges. After keys and a time range are selected, the page loads only models that actually occur in matching audit requests. The review API key is AES-GCM encrypted in the audit SQLite database; the local encryption key is generated next to the audit database with mode `0600`.
 
 Review jobs compare each request's normalized message sequence with recent conversation branches. Only newly appended messages are sent to the review model, identical deltas reuse cached results, and an earlier risk is inherited while that message remains in the request history. The default mode reviews user messages only; user plus tool messages and all-message modes are also available.
 
@@ -231,6 +231,7 @@ GET /api/review/config
 PUT /api/review/config
 POST /api/review/config/test
 GET /api/review/keys
+GET /api/review/models
 GET /api/review/jobs
 POST /api/review/jobs
 GET /api/review/jobs/{job_id}

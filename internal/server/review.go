@@ -76,6 +76,28 @@ func (s *Server) handleReviewKeys(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, items)
 }
 
+func (s *Server) handleReviewModels(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !s.reviewAvailable(w) {
+		return
+	}
+	tokenIDs := parseInt64List(r.URL.Query().Get("token_ids"), 500)
+	items, err := s.reviewer.ModelOptions(
+		r.Context(),
+		tokenIDs,
+		int64(queryInt(r, "start", 0)),
+		int64(queryInt(r, "end", 0)),
+	)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
 func (s *Server) handleReviewJobs(w http.ResponseWriter, r *http.Request) {
 	if !s.reviewAvailable(w) {
 		return
@@ -189,4 +211,21 @@ func (s *Server) reviewAvailable(w http.ResponseWriter) bool {
 func decodeLimitedJSON(w http.ResponseWriter, r *http.Request, target any) error {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	return json.NewDecoder(r.Body).Decode(target)
+}
+
+func parseInt64List(value string, limit int) []int64 {
+	seen := make(map[int64]bool)
+	items := make([]int64, 0)
+	for _, part := range strings.Split(value, ",") {
+		parsed, err := strconv.ParseInt(strings.TrimSpace(part), 10, 64)
+		if err != nil || parsed <= 0 || seen[parsed] {
+			continue
+		}
+		seen[parsed] = true
+		items = append(items, parsed)
+		if len(items) >= limit {
+			break
+		}
+	}
+	return items
 }
