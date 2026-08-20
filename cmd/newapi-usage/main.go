@@ -12,6 +12,7 @@ import (
 	"github.com/mucsbr/newapi-usage/internal/audit"
 	"github.com/mucsbr/newapi-usage/internal/channels"
 	"github.com/mucsbr/newapi-usage/internal/config"
+	"github.com/mucsbr/newapi-usage/internal/review"
 	"github.com/mucsbr/newapi-usage/internal/server"
 	"github.com/mucsbr/newapi-usage/internal/store"
 )
@@ -59,6 +60,20 @@ func main() {
 			os.Exit(1)
 		}
 		auditIndex = aud
+	}
+
+	var reviewManager *review.Manager
+	stopReview := func() {}
+	if auditIndex != nil {
+		reviewer, err := review.Open(review.Config{IndexDSN: cfg.AuditIndexDSN})
+		if err != nil {
+			slog.Error("review manager failed", "error", err)
+			os.Exit(1)
+		}
+		reviewManager = reviewer
+	}
+
+	if auditIndex != nil {
 		auditCtx, cancelAudit := context.WithCancel(context.Background())
 		stopAudit = cancelAudit
 		auditIndex.Start(auditCtx)
@@ -66,6 +81,17 @@ func main() {
 			stopAudit()
 			if err := auditIndex.Close(); err != nil {
 				slog.Error("audit index close failed", "error", err)
+			}
+		}()
+	}
+	if reviewManager != nil {
+		reviewCtx, cancelReview := context.WithCancel(context.Background())
+		stopReview = cancelReview
+		reviewManager.Start(reviewCtx)
+		defer func() {
+			stopReview()
+			if err := reviewManager.Close(); err != nil {
+				slog.Error("review manager close failed", "error", err)
 			}
 		}()
 	}
@@ -82,7 +108,7 @@ func main() {
 		}()
 	}
 
-	app := server.New(st, auditIndex, chManager, cfg.AdminPassword)
+	app := server.New(st, auditIndex, chManager, reviewManager, cfg.AdminPassword)
 	httpServer := &http.Server{
 		Addr:              cfg.Addr(),
 		Handler:           app.Handler(),
@@ -100,6 +126,7 @@ func main() {
 			"audit_enabled", auditIndex != nil && auditIndex.Enabled(),
 			"audit_glob", cfg.AuditLogGlob,
 			"audit_timezone", cfg.AuditTimezone,
+			"review_enabled", reviewManager != nil,
 			"channels_enabled", chManager.Enabled(),
 		)
 		if err := httpServer.ListenAndServe(); err != nil && !server.IsServerClosed(err) {
@@ -113,6 +140,7 @@ func main() {
 	<-stop
 
 	stopAudit()
+	stopReview()
 	stopChannels()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

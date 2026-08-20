@@ -39,3 +39,9 @@ func decodeBody(raw string, encoded []byte, encoding string) (string, error) {
 	}
 	return string(decoded), nil
 }
+
+// DecodeStoredBody exposes audit body decoding to background processors that
+// share the audit SQLite database without duplicating the storage format.
+func DecodeStoredBody(raw string, encoded []byte, encoding string) (string, error) {
+	return decodeBody(raw, encoded, encoding)
+}

@@ -14,6 +14,7 @@ import (
 
 	"github.com/mucsbr/newapi-usage/internal/audit"
 	"github.com/mucsbr/newapi-usage/internal/channels"
+	"github.com/mucsbr/newapi-usage/internal/review"
 	"github.com/mucsbr/newapi-usage/internal/store"
 )
 
@@ -24,12 +25,13 @@ type Server struct {
 	store         *store.Store
 	audit         *audit.Indexer
 	channels      *channels.Manager
+	reviewer      *review.Manager
 	adminPassword string
 	mux           *http.ServeMux
 }
 
-func New(st *store.Store, aud *audit.Indexer, ch *channels.Manager, adminPassword string) *Server {
-	s := &Server{store: st, audit: aud, channels: ch, adminPassword: adminPassword, mux: http.NewServeMux()}
+func New(st *store.Store, aud *audit.Indexer, ch *channels.Manager, reviewer *review.Manager, adminPassword string) *Server {
+	s := &Server{store: st, audit: aud, channels: ch, reviewer: reviewer, adminPassword: adminPassword, mux: http.NewServeMux()}
 	s.routes()
 	return s
 }
@@ -57,6 +59,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/logs", s.handleLogs)
 	s.mux.HandleFunc("/api/logs/", s.handleLogSubroutes)
 	s.mux.HandleFunc("/api/audit/status", s.handleAuditStatus)
+	s.mux.HandleFunc("/api/review/config", s.handleReviewConfig)
+	s.mux.HandleFunc("/api/review/config/test", s.handleReviewConfigTest)
+	s.mux.HandleFunc("/api/review/jobs", s.handleReviewJobs)
+	s.mux.HandleFunc("/api/review/jobs/", s.handleReviewJob)
 	s.mux.HandleFunc("/api/channels/balance", s.handleChannelsBalance)
 	s.mux.HandleFunc("/api/channels/sub2api/accounts/", s.handleSub2APIUsage)
 	s.mux.HandleFunc("/api/channels/opencode/accounts/", s.handleOpenCodeUsage)

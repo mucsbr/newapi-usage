@@ -19,6 +19,18 @@ func NormalizeMessages(body string) []Message {
 	if messages := normalizeGeminiContents(obj); len(messages) > 0 {
 		return messages
 	}
+	if messages := normalizePromptInput(obj); len(messages) > 0 {
+		return messages
+	}
+	return []Message{}
+}
+
+func normalizePromptInput(obj map[string]any) []Message {
+	for _, key := range []string{"prompt", "query"} {
+		if content := contentToText(obj[key]); content != "" {
+			return []Message{{Role: "user", Content: content}}
+		}
+	}
 	return []Message{}
 }
 

@@ -384,6 +384,7 @@ func (i *Indexer) Status(ctx context.Context) (Status, error) {
 func (i *Indexer) initSchema(ctx context.Context) error {
 	statements := []string{
 		`PRAGMA journal_mode=WAL`,
+		`PRAGMA busy_timeout=5000`,
 		`CREATE TABLE IF NOT EXISTS audit_files (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			path TEXT NOT NULL UNIQUE,
