@@ -18,7 +18,7 @@ func (m *Manager) Settings(ctx context.Context) (Settings, error) {
 	settings, err := m.loadSettings(ctx)
 	if err != nil {
 		if err == ErrNotConfigured {
-			return Settings{Policy: DefaultPolicy, ResponseMode: "auto", ReasoningEffort: ReasoningAuto}, nil
+			return Settings{Policy: DefaultPolicy, ResponseMode: "auto", ReasoningEffort: ReasoningAuto, Concurrency: 5}, nil
 		}
 		return Settings{}, err
 	}
@@ -27,7 +27,7 @@ func (m *Manager) Settings(ctx context.Context) (Settings, error) {
 
 func (m *Manager) SaveSettings(ctx context.Context, input SettingsInput) (Settings, error) {
 	var activeJobs int64
-	if err := m.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM review_jobs WHERE status IN ('queued', 'planning', 'running', 'paused')`).Scan(&activeJobs); err != nil {
+	if err := m.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM review_jobs WHERE status IN ('queued', 'claimed', 'planning', 'running', 'paused')`).Scan(&activeJobs); err != nil {
 		return Settings{}, err
 	}
 	if activeJobs > 0 {
@@ -46,6 +46,7 @@ func (m *Manager) SaveSettings(ctx context.Context, input SettingsInput) (Settin
 		policy = DefaultPolicy
 	}
 	reasoningEffort := normalizeReasoningEffort(input.ReasoningEffort)
+	concurrency := normalizeConcurrency(input.Concurrency)
 
 	apiKey := strings.TrimSpace(input.APIKey)
 	var cipherText []byte
@@ -69,8 +70,8 @@ func (m *Manager) SaveSettings(ctx context.Context, input SettingsInput) (Settin
 	keyTail = tail(apiKey, 6)
 	now := time.Now().Unix()
 	_, err = m.db.ExecContext(ctx, `INSERT INTO review_settings (
-		id, base_url, api_key_cipher, key_tail, model, policy, response_mode, reasoning_effort, updated_at
-	) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+		id, base_url, api_key_cipher, key_tail, model, policy, response_mode, reasoning_effort, concurrency, updated_at
+	) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(id) DO UPDATE SET
 		base_url = excluded.base_url,
 		api_key_cipher = excluded.api_key_cipher,
@@ -79,8 +80,9 @@ func (m *Manager) SaveSettings(ctx context.Context, input SettingsInput) (Settin
 		policy = excluded.policy,
 		response_mode = excluded.response_mode,
 		reasoning_effort = excluded.reasoning_effort,
+		concurrency = excluded.concurrency,
 		updated_at = excluded.updated_at`,
-		baseURL, cipherText, keyTail, model, policy, responseMode, reasoningEffort, now)
+		baseURL, cipherText, keyTail, model, policy, responseMode, reasoningEffort, concurrency, now)
 	if err != nil {
 		return Settings{}, err
 	}
@@ -90,6 +92,7 @@ func (m *Manager) SaveSettings(ctx context.Context, input SettingsInput) (Settin
 		Policy:          policy,
 		ResponseMode:    responseMode,
 		ReasoningEffort: reasoningEffort,
+		Concurrency:     concurrency,
 		KeyConfigured:   true,
 		KeyTail:         keyTail,
 		UpdatedAt:       now,
@@ -115,7 +118,7 @@ func (m *Manager) TestSettings(ctx context.Context, input SettingsInput) (TestRe
 func (m *Manager) loadSettings(ctx context.Context) (storedSettings, error) {
 	var settings storedSettings
 	var cipherText []byte
-	err := m.db.QueryRowContext(ctx, `SELECT base_url, api_key_cipher, key_tail, model, policy, response_mode, reasoning_effort, updated_at FROM review_settings WHERE id = 1`).Scan(
+	err := m.db.QueryRowContext(ctx, `SELECT base_url, api_key_cipher, key_tail, model, policy, response_mode, reasoning_effort, concurrency, updated_at FROM review_settings WHERE id = 1`).Scan(
 		&settings.BaseURL,
 		&cipherText,
 		&settings.KeyTail,
@@ -123,6 +126,7 @@ func (m *Manager) loadSettings(ctx context.Context) (storedSettings, error) {
 		&settings.Policy,
 		&settings.ResponseMode,
 		&settings.ReasoningEffort,
+		&settings.Concurrency,
 		&settings.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
@@ -146,6 +150,7 @@ func (m *Manager) loadSettings(ctx context.Context) (storedSettings, error) {
 		settings.ResponseMode = "auto"
 	}
 	settings.ReasoningEffort = normalizeReasoningEffort(settings.ReasoningEffort)
+	settings.Concurrency = normalizeConcurrency(settings.Concurrency)
 	return settings, nil
 }
 
@@ -180,10 +185,15 @@ func (m *Manager) settingsFromInput(ctx context.Context, input SettingsInput) (s
 		reasoningEffort = current.ReasoningEffort
 	}
 	reasoningEffort = normalizeReasoningEffort(reasoningEffort)
+	concurrency := input.Concurrency
+	if concurrency <= 0 {
+		concurrency = current.Concurrency
+	}
+	concurrency = normalizeConcurrency(concurrency)
 	if model == "" || apiKey == "" {
 		return storedSettings{}, ErrNotConfigured
 	}
-	return storedSettings{Settings: Settings{BaseURL: normalized, Model: model, Policy: policy, ReasoningEffort: reasoningEffort}, APIKey: apiKey}, nil
+	return storedSettings{Settings: Settings{BaseURL: normalized, Model: model, Policy: policy, ReasoningEffort: reasoningEffort, Concurrency: concurrency}, APIKey: apiKey}, nil
 }
 
 func normalizeReasoningEffort(value string) string {
@@ -193,6 +203,16 @@ func normalizeReasoningEffort(value string) string {
 	default:
 		return ReasoningAuto
 	}
+}
+
+func normalizeConcurrency(value int) int {
+	if value <= 0 {
+		return 5
+	}
+	if value > 20 {
+		return 20
+	}
+	return value
 }
 
 func normalizeBaseURL(value string) (string, error) {

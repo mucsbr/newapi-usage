@@ -54,11 +54,11 @@ func (m *Manager) CreateJob(ctx context.Context, input JobInput) (Job, error) {
 	now := time.Now().Unix()
 	configHash := reviewConfigHash(settings)
 	result, err := m.db.ExecContext(ctx, `INSERT INTO review_jobs (
-		token_ids, models, start_at, end_at, role_mode, review_model, reasoning_effort, config_hash, status,
+		token_ids, models, start_at, end_at, role_mode, review_model, reasoning_effort, concurrency, config_hash, status,
 		max_entry_id, total_entries, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		string(tokenJSON), string(modelJSON), input.Start, input.End, input.RoleMode, settings.Model,
-		settings.ReasoningEffort, configHash, StatusQueued, maxEntryID, totalEntries, now, now)
+		settings.ReasoningEffort, settings.Concurrency, configHash, StatusQueued, maxEntryID, totalEntries, now, now)
 	if err != nil {
 		return Job{}, err
 	}
@@ -132,7 +132,7 @@ func (m *Manager) Job(ctx context.Context, id int64) (Job, error) {
 }
 
 func (m *Manager) PauseJob(ctx context.Context, id int64) (Job, error) {
-	return m.setJobStatus(ctx, id, StatusPaused, []string{StatusQueued, StatusPlanning, StatusRunning})
+	return m.setJobStatus(ctx, id, StatusPaused, []string{StatusQueued, StatusClaimed, StatusPlanning, StatusRunning})
 }
 
 func (m *Manager) ResumeJob(ctx context.Context, id int64) (Job, error) {
@@ -144,7 +144,7 @@ func (m *Manager) ResumeJob(ctx context.Context, id int64) (Job, error) {
 }
 
 func (m *Manager) CancelJob(ctx context.Context, id int64) (Job, error) {
-	return m.setJobStatus(ctx, id, StatusCanceled, []string{StatusQueued, StatusPlanning, StatusRunning, StatusPaused, StatusFailed})
+	return m.setJobStatus(ctx, id, StatusCanceled, []string{StatusQueued, StatusClaimed, StatusPlanning, StatusRunning, StatusPaused, StatusFailed})
 }
 
 func (m *Manager) setJobStatus(ctx context.Context, id int64, status string, allowed []string) (Job, error) {
@@ -240,7 +240,7 @@ func (m *Manager) Results(ctx context.Context, jobID int64, filter ResultFilter)
 }
 
 func jobSelect() string {
-	return `SELECT id, token_ids, models, start_at, end_at, role_mode, review_model, reasoning_effort, config_hash, status, max_entry_id,
+	return `SELECT id, token_ids, models, start_at, end_at, role_mode, review_model, reasoning_effort, concurrency, config_hash, status, max_entry_id,
 		total_entries, processed_entries, review_units, reviewed_units, cache_hits,
 		flagged_entries, error_entries, estimated_chars, prompt_tokens, completion_tokens,
 		error, created_at, started_at, completed_at, updated_at FROM review_jobs`
@@ -254,7 +254,7 @@ func scanJob(row rowScanner) (Job, error) {
 	var item Job
 	var tokenJSON, modelJSON string
 	err := row.Scan(
-		&item.ID, &tokenJSON, &modelJSON, &item.Start, &item.End, &item.RoleMode, &item.ReviewModel, &item.ReasoningEffort, &item.ConfigHash, &item.Status,
+		&item.ID, &tokenJSON, &modelJSON, &item.Start, &item.End, &item.RoleMode, &item.ReviewModel, &item.ReasoningEffort, &item.Concurrency, &item.ConfigHash, &item.Status,
 		&item.MaxEntryID, &item.TotalEntries, &item.ProcessedEntries, &item.ReviewUnits,
 		&item.ReviewedUnits, &item.CacheHits, &item.FlaggedEntries, &item.ErrorEntries,
 		&item.EstimatedChars, &item.PromptTokens, &item.CompletionTokens, &item.Error,

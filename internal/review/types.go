@@ -4,6 +4,7 @@ import "time"
 
 const (
 	StatusQueued    = "queued"
+	StatusClaimed   = "claimed"
 	StatusPlanning  = "planning"
 	StatusRunning   = "running"
 	StatusPaused    = "paused"
@@ -64,6 +65,7 @@ type SettingsInput struct {
 	Model           string `json:"model"`
 	Policy          string `json:"policy"`
 	ReasoningEffort string `json:"reasoning_effort"`
+	Concurrency     int    `json:"concurrency"`
 }
 
 type Settings struct {
@@ -72,6 +74,7 @@ type Settings struct {
 	Policy          string `json:"policy"`
 	ResponseMode    string `json:"response_mode"`
 	ReasoningEffort string `json:"reasoning_effort"`
+	Concurrency     int    `json:"concurrency"`
 	KeyConfigured   bool   `json:"key_configured"`
 	KeyTail         string `json:"key_tail,omitempty"`
 	UpdatedAt       int64  `json:"updated_at"`
@@ -101,6 +104,7 @@ type Job struct {
 	RoleMode         string   `json:"role_mode"`
 	ReviewModel      string   `json:"review_model"`
 	ReasoningEffort  string   `json:"reasoning_effort"`
+	Concurrency      int      `json:"concurrency"`
 	ConfigHash       string   `json:"-"`
 	Status           string   `json:"status"`
 	MaxEntryID       int64    `json:"max_entry_id"`

@@ -25,14 +25,20 @@ var (
 	ErrNotFound      = errors.New("review job not found")
 )
 
+const (
+	concurrentJobWorkers     = 3
+	globalRequestConcurrency = 10
+)
+
 type Manager struct {
-	db        *sql.DB
-	cfg       Config
-	secret    []byte
-	client    *http.Client
-	wake      chan struct{}
-	wg        sync.WaitGroup
-	closeOnce sync.Once
+	db           *sql.DB
+	cfg          Config
+	secret       []byte
+	client       *http.Client
+	wake         chan struct{}
+	requestSlots chan struct{}
+	wg           sync.WaitGroup
+	closeOnce    sync.Once
 }
 
 func Open(cfg Config) (*Manager, error) {
@@ -57,17 +63,18 @@ func Open(cfg Config) (*Manager, error) {
 		return nil, err
 	}
 	m := &Manager{
-		db:     db,
-		cfg:    cfg,
-		secret: secret,
-		client: &http.Client{Timeout: cfg.Timeout},
-		wake:   make(chan struct{}, 1),
+		db:           db,
+		cfg:          cfg,
+		secret:       secret,
+		client:       &http.Client{Timeout: cfg.Timeout},
+		wake:         make(chan struct{}, 1),
+		requestSlots: make(chan struct{}, globalRequestConcurrency),
 	}
 	if err := m.initSchema(context.Background()); err != nil {
 		db.Close()
 		return nil, err
 	}
-	if _, err := db.Exec(`UPDATE review_jobs SET status = 'queued', updated_at = ? WHERE status IN ('planning', 'running')`, time.Now().Unix()); err != nil {
+	if _, err := db.Exec(`UPDATE review_jobs SET status = 'queued', updated_at = ? WHERE status IN ('claimed', 'planning', 'running')`, time.Now().Unix()); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -78,11 +85,13 @@ func (m *Manager) Start(ctx context.Context) {
 	if m == nil {
 		return
 	}
-	m.wg.Add(1)
-	go func() {
-		defer m.wg.Done()
-		m.run(ctx)
-	}()
+	for range concurrentJobWorkers {
+		m.wg.Add(1)
+		go func() {
+			defer m.wg.Done()
+			m.run(ctx)
+		}()
+	}
 }
 
 func (m *Manager) Close() error {

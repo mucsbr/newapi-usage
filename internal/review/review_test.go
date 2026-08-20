@@ -230,3 +230,88 @@ func TestReviewClientAutoDetectsRequiredReasoningEffort(t *testing.T) {
 		t.Fatalf("mode=%q effort=%q decision=%+v calls=%d", mode, effort, decision, calls)
 	}
 }
+
+func TestReviewManagerRunsIndependentJobsConcurrently(t *testing.T) {
+	dir := t.TempDir()
+	indexPath := filepath.Join(dir, "audit.db")
+	logPath := filepath.Join(dir, "request.jsonl")
+	lines := []string{
+		`{"time":2000,"path":"/v1/chat/completions","headers":{"authorization":"Bearer sk-a"},"body":{"model":"gpt-test","messages":[{"role":"user","content":"任务 A"}]}}`,
+		`{"time":2000,"path":"/v1/chat/completions","headers":{"authorization":"Bearer sk-b"},"body":{"model":"gpt-test","messages":[{"role":"user","content":"任务 B"}]}}`,
+	}
+	if err := os.WriteFile(logPath, []byte(strings.Join(lines, "\n")+"\n"), 0600); err != nil {
+		t.Fatalf("write audit log: %v", err)
+	}
+	idx, err := audit.Open(audit.Config{LogGlob: logPath, IndexDSN: indexPath, TimeZone: "UTC"}, func(key string) (audit.ResolvedToken, error) {
+		if key == "sk-a" {
+			return audit.ResolvedToken{TokenID: 7}, nil
+		}
+		return audit.ResolvedToken{TokenID: 8}, nil
+	})
+	if err != nil {
+		t.Fatalf("open audit: %v", err)
+	}
+	if err := idx.ScanOnce(context.Background()); err != nil {
+		t.Fatalf("scan audit: %v", err)
+	}
+	if err := idx.Close(); err != nil {
+		t.Fatalf("close audit: %v", err)
+	}
+
+	var mu sync.Mutex
+	active, maxActive := 0, 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		active++
+		if active > maxActive {
+			maxActive = active
+		}
+		mu.Unlock()
+		time.Sleep(120 * time.Millisecond)
+		mu.Lock()
+		active--
+		mu.Unlock()
+		_, _ = io.WriteString(w, `{"choices":[{"message":{"content":"{\"decision\":\"通过\",\"risk_score\":1,\"categories\":[],\"reason\":\"正常\",\"confidence\":0.99}"}}],"usage":{}}`)
+	}))
+	defer server.Close()
+
+	manager, err := Open(Config{IndexDSN: indexPath, Timeout: 5 * time.Second, PollEvery: 10 * time.Millisecond})
+	if err != nil {
+		t.Fatalf("open review: %v", err)
+	}
+	if _, err := manager.SaveSettings(context.Background(), SettingsInput{
+		BaseURL: server.URL + "/v1", APIKey: "key", Model: "review-model",
+		Policy: DefaultPolicy, Concurrency: 1,
+	}); err != nil {
+		t.Fatalf("save settings: %v", err)
+	}
+	jobA, err := manager.CreateJob(context.Background(), JobInput{TokenIDs: []int64{7}, Models: []string{"gpt-test"}, Start: 2000, End: 2000, RoleMode: RoleUser})
+	if err != nil {
+		t.Fatalf("create job A: %v", err)
+	}
+	jobB, err := manager.CreateJob(context.Background(), JobInput{TokenIDs: []int64{8}, Models: []string{"gpt-test"}, Start: 2000, End: 2000, RoleMode: RoleUser})
+	if err != nil {
+		t.Fatalf("create job B: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	manager.Start(ctx)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		a, _ := manager.Job(context.Background(), jobA.ID)
+		b, _ := manager.Job(context.Background(), jobB.ID)
+		if a.Status == StatusCompleted && b.Status == StatusCompleted {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	if err := manager.Close(); err != nil {
+		t.Fatalf("close review: %v", err)
+	}
+	mu.Lock()
+	gotMaxActive := maxActive
+	mu.Unlock()
+	if gotMaxActive < 2 {
+		t.Fatalf("jobs were not concurrent, max active requests = %d", gotMaxActive)
+	}
+}

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mucsbr/newapi-usage/internal/audit"
@@ -28,7 +29,7 @@ type workEntry struct {
 }
 
 func (m *Manager) runNextJob(ctx context.Context) error {
-	job, err := m.nextQueuedJob(ctx)
+	job, err := m.claimNextQueuedJob(ctx)
 	if err == sql.ErrNoRows {
 		return nil
 	}
@@ -41,7 +42,7 @@ func (m *Manager) runNextJob(ctx context.Context) error {
 	}
 	if planned != job.TotalEntries {
 		if _, err := m.db.ExecContext(ctx, `UPDATE review_jobs SET status = ?, started_at = CASE WHEN started_at = 0 THEN ? ELSE started_at END, error = '', updated_at = ? WHERE id = ? AND status = ?`,
-			StatusPlanning, time.Now().Unix(), time.Now().Unix(), job.ID, StatusQueued); err != nil {
+			StatusPlanning, time.Now().Unix(), time.Now().Unix(), job.ID, StatusClaimed); err != nil {
 			return err
 		}
 		job.Status = StatusPlanning
@@ -54,7 +55,7 @@ func (m *Manager) runNextJob(ctx context.Context) error {
 		}
 	}
 	if _, err := m.db.ExecContext(ctx, `UPDATE review_jobs SET status = ?, started_at = CASE WHEN started_at = 0 THEN ? ELSE started_at END, updated_at = ? WHERE id = ? AND status IN (?, ?)`,
-		StatusRunning, time.Now().Unix(), time.Now().Unix(), job.ID, StatusQueued, StatusPlanning); err != nil {
+		StatusRunning, time.Now().Unix(), time.Now().Unix(), job.ID, StatusClaimed, StatusPlanning); err != nil {
 		return err
 	}
 	settings, err := m.loadSettings(ctx)
@@ -82,8 +83,20 @@ func (m *Manager) runNextJob(ctx context.Context) error {
 		if status != StatusRunning {
 			return nil
 		}
-		entry, err := m.nextWorkEntry(ctx, job.ID)
-		if err == sql.ErrNoRows {
+		entries, err := m.nextReadyWorkEntries(ctx, job.ID, normalizeConcurrency(job.Concurrency))
+		if err != nil {
+			return err
+		}
+		if len(entries) == 0 {
+			var pending int64
+			if err := m.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM review_job_entries WHERE job_id = ? AND status = 'pending'`, job.ID).Scan(&pending); err != nil {
+				return err
+			}
+			if pending > 0 {
+				err := fmt.Errorf("review job has %d blocked entries", pending)
+				m.failJob(context.Background(), job.ID, err)
+				return err
+			}
 			_, err = m.db.ExecContext(ctx, `UPDATE review_jobs SET status = ?, completed_at = ?, updated_at = ? WHERE id = ? AND status = ?`,
 				StatusCompleted, time.Now().Unix(), time.Now().Unix(), job.ID, StatusRunning)
 			if err == nil {
@@ -93,10 +106,7 @@ func (m *Manager) runNextJob(ctx context.Context) error {
 			}
 			return err
 		}
-		if err != nil {
-			return err
-		}
-		if err := m.processEntry(ctx, job, entry, &settings, configHash); err != nil {
+		if err := m.processWorkBatch(ctx, job, entries, settings, configHash); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				m.failJob(context.Background(), job.ID, err)
 			}
@@ -105,8 +115,31 @@ func (m *Manager) runNextJob(ctx context.Context) error {
 	}
 }
 
-func (m *Manager) nextQueuedJob(ctx context.Context) (Job, error) {
-	return scanJob(m.db.QueryRowContext(ctx, jobSelect()+` WHERE status = ? ORDER BY id LIMIT 1`, StatusQueued))
+func (m *Manager) claimNextQueuedJob(ctx context.Context) (Job, error) {
+	tx, err := m.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Job{}, err
+	}
+	job, err := scanJob(tx.QueryRowContext(ctx, jobSelect()+` WHERE status = ? ORDER BY id LIMIT 1`, StatusQueued))
+	if err != nil {
+		tx.Rollback()
+		return Job{}, err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE review_jobs SET status = ?, updated_at = ? WHERE id = ? AND status = ?`, StatusClaimed, time.Now().Unix(), job.ID, StatusQueued)
+	if err != nil {
+		tx.Rollback()
+		return Job{}, err
+	}
+	changed, _ := result.RowsAffected()
+	if changed == 0 {
+		tx.Rollback()
+		return Job{}, sql.ErrNoRows
+	}
+	if err := tx.Commit(); err != nil {
+		return Job{}, err
+	}
+	job.Status = StatusClaimed
+	return job, nil
 }
 
 func (m *Manager) currentJobStatus(ctx context.Context, jobID int64) (string, error) {
@@ -115,15 +148,75 @@ func (m *Manager) currentJobStatus(ctx context.Context, jobID int64) (string, er
 	return status, err
 }
 
-func (m *Manager) nextWorkEntry(ctx context.Context, jobID int64) (workEntry, error) {
-	var entry workEntry
-	err := m.db.QueryRowContext(ctx, `SELECT id, audit_entry_id, token_id, created_at, parent_audit_entry_id, delta_start_index, content_hash
-		FROM review_job_entries WHERE job_id = ? AND status = 'pending'
-		ORDER BY token_id, created_at, audit_entry_id LIMIT 1`, jobID).Scan(
-		&entry.ID, &entry.AuditEntryID, &entry.TokenID, &entry.CreatedAt,
-		&entry.ParentEntryID, &entry.DeltaStart, &entry.ContentHash,
-	)
-	return entry, err
+func (m *Manager) nextReadyWorkEntries(ctx context.Context, jobID int64, limit int) ([]workEntry, error) {
+	rows, err := m.db.QueryContext(ctx, `SELECT e.id, e.audit_entry_id, e.token_id, e.created_at, e.parent_audit_entry_id, e.delta_start_index, e.content_hash
+		FROM review_job_entries e
+		WHERE e.job_id = ? AND e.status = 'pending' AND (
+			e.parent_audit_entry_id = 0 OR
+			NOT EXISTS (SELECT 1 FROM review_job_entries p WHERE p.job_id = e.job_id AND p.audit_entry_id = e.parent_audit_entry_id) OR
+			EXISTS (SELECT 1 FROM review_job_entries p WHERE p.job_id = e.job_id AND p.audit_entry_id = e.parent_audit_entry_id AND p.status IN ('done', 'error'))
+		)
+		ORDER BY e.token_id, e.created_at, e.audit_entry_id LIMIT ?`, jobID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]workEntry, 0, limit)
+	for rows.Next() {
+		var entry workEntry
+		if err := rows.Scan(&entry.ID, &entry.AuditEntryID, &entry.TokenID, &entry.CreatedAt, &entry.ParentEntryID, &entry.DeltaStart, &entry.ContentHash); err != nil {
+			return nil, err
+		}
+		items = append(items, entry)
+	}
+	return items, rows.Err()
+}
+
+func (m *Manager) processWorkBatch(ctx context.Context, job Job, entries []workEntry, settings storedSettings, configHash string) error {
+	groups := make(map[string][]workEntry)
+	order := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		key := entry.ContentHash
+		if key == "" {
+			key = fmt.Sprintf("empty:%d", entry.ID)
+		}
+		if _, exists := groups[key]; !exists {
+			order = append(order, key)
+		}
+		groups[key] = append(groups[key], entry)
+	}
+	var wg sync.WaitGroup
+	errCh := make(chan error, len(order))
+	for _, key := range order {
+		batch := groups[key]
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			localSettings := settings
+			for _, entry := range batch {
+				status, err := m.currentJobStatus(ctx, job.ID)
+				if err != nil {
+					errCh <- err
+					return
+				}
+				if status != StatusRunning {
+					return
+				}
+				if err := m.processEntry(ctx, job, entry, &localSettings, configHash); err != nil {
+					errCh <- err
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (m *Manager) processEntry(ctx context.Context, job Job, entry workEntry, settings *storedSettings, configHash string) error {

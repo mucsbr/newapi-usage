@@ -18,6 +18,7 @@ func (m *Manager) initSchema(ctx context.Context) error {
 			policy TEXT NOT NULL DEFAULT '',
 			response_mode TEXT NOT NULL DEFAULT 'auto',
 			reasoning_effort TEXT NOT NULL DEFAULT 'auto',
+			concurrency INTEGER NOT NULL DEFAULT 5,
 			updated_at INTEGER NOT NULL DEFAULT 0
 		)`,
 		`CREATE TABLE IF NOT EXISTS review_jobs (
@@ -29,6 +30,7 @@ func (m *Manager) initSchema(ctx context.Context) error {
 			role_mode TEXT NOT NULL DEFAULT 'user',
 			review_model TEXT NOT NULL DEFAULT '',
 			reasoning_effort TEXT NOT NULL DEFAULT 'auto',
+			concurrency INTEGER NOT NULL DEFAULT 5,
 			config_hash TEXT NOT NULL DEFAULT '',
 			status TEXT NOT NULL DEFAULT 'queued',
 			max_entry_id INTEGER NOT NULL DEFAULT 0,
@@ -107,6 +109,8 @@ func (m *Manager) initSchema(ctx context.Context) error {
 		{table: "review_settings", name: "reasoning_effort", definition: "TEXT NOT NULL DEFAULT 'auto'"},
 		{table: "review_jobs", name: "reasoning_effort", definition: "TEXT NOT NULL DEFAULT 'auto'"},
 		{table: "review_jobs", name: "models", definition: "TEXT NOT NULL DEFAULT '[]'"},
+		{table: "review_settings", name: "concurrency", definition: "INTEGER NOT NULL DEFAULT 5"},
+		{table: "review_jobs", name: "concurrency", definition: "INTEGER NOT NULL DEFAULT 5"},
 	} {
 		if err := m.addColumnIfMissing(ctx, column.table, column.name, column.definition); err != nil {
 			return err

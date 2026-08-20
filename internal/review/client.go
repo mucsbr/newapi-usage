@@ -92,6 +92,14 @@ func (m *Manager) callReviewMode(ctx context.Context, settings storedSettings, c
 	req.Header.Set("Authorization", "Bearer "+settings.APIKey)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
+	if m.requestSlots != nil {
+		select {
+		case m.requestSlots <- struct{}{}:
+			defer func() { <-m.requestSlots }()
+		case <-ctx.Done():
+			return Decision{}, tokenUsage{}, ctx.Err()
+		}
+	}
 	resp, err := m.client.Do(req)
 	if err != nil {
 		return Decision{}, tokenUsage{}, err
