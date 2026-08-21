@@ -115,19 +115,27 @@ func (s *Store) summary(ctx context.Context, tr TimeRange, tokenID int64) (Summa
 
 	cacheArgs := append([]any{}, args...)
 	cacheArgs = append(cacheArgs, `%"cache_tokens"%`)
-	cacheQuery := fmt.Sprintf(`SELECT COALESCE(l.other, '') FROM logs l %s AND l.other LIKE %s`,
+	cacheQuery := fmt.Sprintf(`SELECT COALESCE(l.prompt_tokens, 0), COALESCE(l.other, '') FROM logs l %s AND l.other LIKE %s`,
 		where, s.placeholder(len(cacheArgs)))
 	rows, err := s.db.QueryContext(ctx, cacheQuery, cacheArgs...)
 	if err != nil {
 		return Summary{}, err
 	}
 	defer rows.Close()
+	cacheRateInputTokens := out.InputTokens
 	for rows.Next() {
+		var promptTokens int64
 		var other string
-		if err := rows.Scan(&other); err != nil {
+		if err := rows.Scan(&promptTokens, &other); err != nil {
 			return Summary{}, err
 		}
-		out.CacheReadTokens += parseLogBillingMeta(other).cacheReadTokens
+		meta := parseLogBillingMeta(other)
+		out.CacheReadTokens += meta.cacheReadTokens
+		if meta.inputTokensTotal > promptTokens {
+			cacheRateInputTokens += meta.inputTokensTotal - promptTokens
+		} else if meta.anthropicUsageSemantic {
+			cacheRateInputTokens += meta.cacheReadTokens + meta.cacheWriteTokens
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return Summary{}, err
@@ -135,8 +143,8 @@ func (s *Store) summary(ctx context.Context, tr TimeRange, tokenID int64) (Summa
 	if err := rows.Close(); err != nil {
 		return Summary{}, err
 	}
-	if out.InputTokens > 0 {
-		out.CacheRate = float64(out.CacheReadTokens) / float64(out.InputTokens) * 100
+	if cacheRateInputTokens > 0 {
+		out.CacheRate = float64(out.CacheReadTokens) / float64(cacheRateInputTokens) * 100
 		if out.CacheRate < 0 {
 			out.CacheRate = 0
 		} else if out.CacheRate > 100 {

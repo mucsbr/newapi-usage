@@ -46,6 +46,7 @@ type logBillingMeta struct {
 	cacheCreationTokens     int64
 	cacheCreationTokens5m   int64
 	cacheCreationTokens1h   int64
+	inputTokensTotal        int64
 	anthropicUsageSemantic  bool
 	tieredBilling           bool
 	modelPrice              float64
@@ -272,18 +273,19 @@ func parseLogBillingMeta(other string) logBillingMeta {
 		return logBillingMeta{}
 	}
 	meta := logBillingMeta{
-		modelRatio:            rawFloat(raw, "model_ratio"),
-		groupRatio:            rawFloat(raw, "group_ratio"),
-		completionRatio:       rawFloat(raw, "completion_ratio"),
-		cacheRatio:            rawFloat(raw, "cache_ratio"),
-		cacheCreationRatio:    rawFloat(raw, "cache_creation_ratio"),
-		cacheCreation5mRatio:  rawFloat(raw, "cache_creation_ratio_5m"),
-		cacheCreation1hRatio:  rawFloat(raw, "cache_creation_ratio_1h"),
-		cacheReadTokens:       rawInt(raw, "cache_tokens"),
-		cacheCreationTokens:   rawInt(raw, "cache_creation_tokens"),
-		cacheCreationTokens5m: rawInt(raw, "cache_creation_tokens_5m"),
-		cacheCreationTokens1h: rawInt(raw, "cache_creation_tokens_1h"),
-		modelPrice:            rawFloat(raw, "model_price"),
+		modelRatio:             rawFloat(raw, "model_ratio"),
+		groupRatio:             rawFloat(raw, "group_ratio"),
+		completionRatio:        rawFloat(raw, "completion_ratio"),
+		cacheRatio:             rawFloat(raw, "cache_ratio"),
+		cacheCreationRatio:     rawFloat(raw, "cache_creation_ratio"),
+		cacheCreation5mRatio:   rawFloat(raw, "cache_creation_ratio_5m"),
+		cacheCreation1hRatio:   rawFloat(raw, "cache_creation_ratio_1h"),
+		cacheReadTokens:        rawInt(raw, "cache_tokens"),
+		cacheCreationTokens:    rawInt(raw, "cache_creation_tokens"),
+		cacheCreationTokens5m:  rawInt(raw, "cache_creation_tokens_5m"),
+		cacheCreationTokens1h:  rawInt(raw, "cache_creation_tokens_1h"),
+		inputTokensTotal:       rawInt(raw, "input_tokens_total"),
+		modelPrice:             rawFloat(raw, "model_price"),
 		anthropicUsageSemantic: rawString(raw, "usage_semantic") == "anthropic" || rawBool(raw, "claude"),
 		tieredBilling:          rawString(raw, "billing_mode") == "tiered_expr",
 	}

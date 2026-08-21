@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"math"
 	"testing"
 	"time"
 
@@ -60,18 +61,18 @@ func TestStoreQueries(t *testing.T) {
 			channel_name, token_id, ip, other, request_id
 		) VALUES
 			(1, 10, 1000, 2, 'ok', 'alice', 'prod-key', 'gpt-4o', 30, 10, 20, 120, 1, 7, 'openai', 1, '1.1.1.1', '{"cache_tokens":4}', 'req-1'),
-			(2, 10, 1001, 2, 'ok', 'alice', 'prod-key', 'claude-3', 40, 15, 25, 140, 0, 8, 'claude', 1, '1.1.1.1', '{"cache_tokens":6}', 'req-2'),
-			(3, 20, 1002, 5, 'err', 'bob', 'test-key', 'gpt-4o', 0, 0, 0, 30, 0, 7, 'openai', 2, '2.2.2.2', '{"cache_tokens":2}', 'req-3')`,
+			(2, 10, 1001, 2, 'ok', 'alice', 'prod-key', 'claude-3', 40, 15, 25, 140, 0, 8, 'claude', 1, '1.1.1.1', '{"cache_tokens":6,"cache_write_tokens":3,"usage_semantic":"anthropic"}', 'req-2'),
+			(3, 20, 1002, 5, 'err', 'bob', 'test-key', 'gpt-4o', 0, 2, 0, 30, 0, 7, 'openai', 2, '2.2.2.2', '{"cache_tokens":2,"input_tokens_total":2}', 'req-3')`,
 	})
 
 	summary, err := s.Summary(context.Background(), TimeRange{})
 	if err != nil {
 		t.Fatalf("summary: %v", err)
 	}
-	if summary.RequestCount != 3 || summary.InputTokens != 25 || summary.OutputTokens != 45 {
+	if summary.RequestCount != 3 || summary.InputTokens != 27 || summary.OutputTokens != 45 {
 		t.Fatalf("unexpected summary: %+v", summary)
 	}
-	if summary.CacheReadTokens != 12 || summary.CacheRate != 48 {
+	if summary.CacheReadTokens != 12 || math.Abs(summary.CacheRate-33.333333333333336) > 0.000001 {
 		t.Fatalf("unexpected summary cache usage: %+v", summary)
 	}
 	tokenSummary, err := s.TokenSummary(context.Background(), TimeRange{}, 1)
@@ -81,7 +82,7 @@ func TestStoreQueries(t *testing.T) {
 	if tokenSummary.RequestCount != 2 || tokenSummary.InputTokens != 25 || tokenSummary.OutputTokens != 45 || tokenSummary.ModelCount != 2 {
 		t.Fatalf("unexpected token summary: %+v", tokenSummary)
 	}
-	if tokenSummary.CacheReadTokens != 10 || tokenSummary.CacheRate != 40 {
+	if tokenSummary.CacheReadTokens != 10 || math.Abs(tokenSummary.CacheRate-29.41176470588235) > 0.000001 {
 		t.Fatalf("unexpected token summary cache usage: %+v", tokenSummary)
 	}
 
