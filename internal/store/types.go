@@ -30,20 +30,22 @@ type LogFilter struct {
 }
 
 type Summary struct {
-	RequestCount int64   `json:"request_count"`
-	SuccessCount int64   `json:"success_count"`
-	ErrorCount   int64   `json:"error_count"`
-	TokenCount   int64   `json:"token_count"`
-	UserCount    int64   `json:"user_count"`
-	ModelCount   int64   `json:"model_count"`
-	InputTokens  int64   `json:"input_tokens"`
-	OutputTokens int64   `json:"output_tokens"`
-	TotalTokens  int64   `json:"total_tokens"`
-	Quota        int64   `json:"quota"`
-	QuotaCNY     float64 `json:"quota_cny"`
-	FirstUsedAt  int64   `json:"first_used_at"`
-	LastUsedAt   int64   `json:"last_used_at"`
-	GeneratedAt  int64   `json:"generated_at"`
+	RequestCount    int64   `json:"request_count"`
+	SuccessCount    int64   `json:"success_count"`
+	ErrorCount      int64   `json:"error_count"`
+	TokenCount      int64   `json:"token_count"`
+	UserCount       int64   `json:"user_count"`
+	ModelCount      int64   `json:"model_count"`
+	InputTokens     int64   `json:"input_tokens"`
+	CacheReadTokens int64   `json:"cache_read_tokens"`
+	CacheRate       float64 `json:"cache_rate"`
+	OutputTokens    int64   `json:"output_tokens"`
+	TotalTokens     int64   `json:"total_tokens"`
+	Quota           int64   `json:"quota"`
+	QuotaCNY        float64 `json:"quota_cny"`
+	FirstUsedAt     int64   `json:"first_used_at"`
+	LastUsedAt      int64   `json:"last_used_at"`
+	GeneratedAt     int64   `json:"generated_at"`
 }
 
 type KeyUsage struct {

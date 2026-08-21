@@ -256,7 +256,7 @@
       .summary {
         margin-top: 14px;
         display: grid;
-        grid-template-columns: repeat(7, minmax(0, 1fr));
+        grid-template-columns: repeat(9, minmax(0, 1fr));
         overflow: hidden;
       }
 
@@ -1042,6 +1042,10 @@
           border-bottom: 1px solid var(--line);
         }
 
+        .metric:nth-child(2n) {
+          border-right: 0;
+        }
+
         .grid {
           grid-template-columns: 1fr;
         }
@@ -1395,6 +1399,8 @@
           ["Keys", data.token_count],
           ["模型", data.model_count],
           ["输入 Tokens", data.input_tokens],
+          ["缓存读 Tokens", data.cache_read_tokens],
+          ["缓存率", formatPercent(data.cache_rate), true],
           ["输出 Tokens", data.output_tokens],
           ["总 Tokens", data.total_tokens],
           ["费用 (CNY)", formatCNY(data.quota_cny), true],

@@ -59,9 +59,9 @@ func TestStoreQueries(t *testing.T) {
 			quota, prompt_tokens, completion_tokens, use_time, is_stream, channel_id,
 			channel_name, token_id, ip, other, request_id
 		) VALUES
-			(1, 10, 1000, 2, 'ok', 'alice', 'prod-key', 'gpt-4o', 30, 10, 20, 120, 1, 7, 'openai', 1, '1.1.1.1', '{}', 'req-1'),
-			(2, 10, 1001, 2, 'ok', 'alice', 'prod-key', 'claude-3', 40, 15, 25, 140, 0, 8, 'claude', 1, '1.1.1.1', '{}', 'req-2'),
-			(3, 20, 1002, 5, 'err', 'bob', 'test-key', 'gpt-4o', 0, 0, 0, 30, 0, 7, 'openai', 2, '2.2.2.2', '{}', 'req-3')`,
+			(1, 10, 1000, 2, 'ok', 'alice', 'prod-key', 'gpt-4o', 30, 10, 20, 120, 1, 7, 'openai', 1, '1.1.1.1', '{"cache_tokens":4}', 'req-1'),
+			(2, 10, 1001, 2, 'ok', 'alice', 'prod-key', 'claude-3', 40, 15, 25, 140, 0, 8, 'claude', 1, '1.1.1.1', '{"cache_tokens":6}', 'req-2'),
+			(3, 20, 1002, 5, 'err', 'bob', 'test-key', 'gpt-4o', 0, 0, 0, 30, 0, 7, 'openai', 2, '2.2.2.2', '{"cache_tokens":2}', 'req-3')`,
 	})
 
 	summary, err := s.Summary(context.Background(), TimeRange{})
@@ -71,12 +71,18 @@ func TestStoreQueries(t *testing.T) {
 	if summary.RequestCount != 3 || summary.InputTokens != 25 || summary.OutputTokens != 45 {
 		t.Fatalf("unexpected summary: %+v", summary)
 	}
+	if summary.CacheReadTokens != 12 || summary.CacheRate != 48 {
+		t.Fatalf("unexpected summary cache usage: %+v", summary)
+	}
 	tokenSummary, err := s.TokenSummary(context.Background(), TimeRange{}, 1)
 	if err != nil {
 		t.Fatalf("token summary: %v", err)
 	}
 	if tokenSummary.RequestCount != 2 || tokenSummary.InputTokens != 25 || tokenSummary.OutputTokens != 45 || tokenSummary.ModelCount != 2 {
 		t.Fatalf("unexpected token summary: %+v", tokenSummary)
+	}
+	if tokenSummary.CacheReadTokens != 10 || tokenSummary.CacheRate != 40 {
+		t.Fatalf("unexpected token summary cache usage: %+v", tokenSummary)
 	}
 
 	keys, err := s.KeyUsage(context.Background(), KeyFilter{Limit: 10})

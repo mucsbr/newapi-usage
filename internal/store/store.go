@@ -109,9 +109,43 @@ func (s *Store) summary(ctx context.Context, tr TimeRange, tokenID int64) (Summa
 		&out.FirstUsedAt,
 		&out.LastUsedAt,
 	)
+	if err != nil {
+		return Summary{}, err
+	}
+
+	cacheArgs := append([]any{}, args...)
+	cacheArgs = append(cacheArgs, `%"cache_tokens"%`)
+	cacheQuery := fmt.Sprintf(`SELECT COALESCE(l.other, '') FROM logs l %s AND l.other LIKE %s`,
+		where, s.placeholder(len(cacheArgs)))
+	rows, err := s.db.QueryContext(ctx, cacheQuery, cacheArgs...)
+	if err != nil {
+		return Summary{}, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var other string
+		if err := rows.Scan(&other); err != nil {
+			return Summary{}, err
+		}
+		out.CacheReadTokens += parseLogBillingMeta(other).cacheReadTokens
+	}
+	if err := rows.Err(); err != nil {
+		return Summary{}, err
+	}
+	if err := rows.Close(); err != nil {
+		return Summary{}, err
+	}
+	if out.InputTokens > 0 {
+		out.CacheRate = float64(out.CacheReadTokens) / float64(out.InputTokens) * 100
+		if out.CacheRate < 0 {
+			out.CacheRate = 0
+		} else if out.CacheRate > 100 {
+			out.CacheRate = 100
+		}
+	}
 	out.QuotaCNY = quotaToCNY(float64(out.Quota), s.billingSettings(ctx))
 	out.GeneratedAt = time.Now().Unix()
-	return out, err
+	return out, nil
 }
 
 func (s *Store) KeyUsage(ctx context.Context, filter KeyFilter) ([]KeyUsage, error) {
