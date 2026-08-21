@@ -2113,7 +2113,7 @@
         const version = item.client_version || "";
         const variant = item.client_variant || "";
         const parts = [name, version, variant].filter(Boolean);
-        return parts.length ? parts.join(" ") : "未知";
+        return parts.length ? parts.join(" ") : String(item.user_agent || "").trim() || "未知";
       }
 
       function closeAuditDialog() {
