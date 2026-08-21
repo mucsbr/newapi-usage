@@ -69,7 +69,7 @@ func TestStoreQueries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("summary: %v", err)
 	}
-	if summary.RequestCount != 3 || summary.InputTokens != 27 || summary.OutputTokens != 45 {
+	if summary.RequestCount != 3 || summary.InputTokens != 36 || summary.OutputTokens != 45 || summary.TotalTokens != 81 {
 		t.Fatalf("unexpected summary: %+v", summary)
 	}
 	if summary.CacheReadTokens != 12 || math.Abs(summary.CacheRate-33.333333333333336) > 0.000001 {
@@ -82,8 +82,8 @@ func TestStoreQueries(t *testing.T) {
 	if tokenSummary.RequestCount != 2 || tokenSummary.InputTokens != 25 || tokenSummary.OutputTokens != 45 || tokenSummary.ModelCount != 2 {
 		t.Fatalf("unexpected token summary: %+v", tokenSummary)
 	}
-	if tokenSummary.CacheReadTokens != 10 || math.Abs(tokenSummary.CacheRate-29.41176470588235) > 0.000001 {
-		t.Fatalf("unexpected token summary cache usage: %+v", tokenSummary)
+	if tokenSummary.CacheReadTokens != 0 || tokenSummary.CacheRate != 0 {
+		t.Fatalf("personal token summary unexpectedly includes admin cache metrics: %+v", tokenSummary)
 	}
 
 	keys, err := s.KeyUsage(context.Background(), KeyFilter{Limit: 10})

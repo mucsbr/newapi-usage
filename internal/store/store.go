@@ -55,17 +55,17 @@ func (s *Store) Ping(ctx context.Context) error {
 }
 
 func (s *Store) Summary(ctx context.Context, tr TimeRange) (Summary, error) {
-	return s.summary(ctx, tr, 0)
+	return s.summary(ctx, tr, 0, true)
 }
 
 func (s *Store) TokenSummary(ctx context.Context, tr TimeRange, tokenID int64) (Summary, error) {
 	if tokenID <= 0 {
 		return Summary{}, fmt.Errorf("invalid token id")
 	}
-	return s.summary(ctx, tr, tokenID)
+	return s.summary(ctx, tr, tokenID, false)
 }
 
-func (s *Store) summary(ctx context.Context, tr TimeRange, tokenID int64) (Summary, error) {
+func (s *Store) summary(ctx context.Context, tr TimeRange, tokenID int64, includeCacheMetrics bool) (Summary, error) {
 	ctx, cancel := s.context(ctx)
 	defer cancel()
 
@@ -112,6 +112,11 @@ func (s *Store) summary(ctx context.Context, tr TimeRange, tokenID int64) (Summa
 	if err != nil {
 		return Summary{}, err
 	}
+	if !includeCacheMetrics {
+		out.QuotaCNY = quotaToCNY(float64(out.Quota), s.billingSettings(ctx))
+		out.GeneratedAt = time.Now().Unix()
+		return out, nil
+	}
 
 	cacheArgs := append([]any{}, args...)
 	cacheArgs = append(cacheArgs, `%"cache_tokens"%`)
@@ -143,6 +148,8 @@ func (s *Store) summary(ctx context.Context, tr TimeRange, tokenID int64) (Summa
 	if err := rows.Close(); err != nil {
 		return Summary{}, err
 	}
+	out.InputTokens = cacheRateInputTokens
+	out.TotalTokens = out.InputTokens + out.OutputTokens
 	if cacheRateInputTokens > 0 {
 		out.CacheRate = float64(out.CacheReadTokens) / float64(cacheRateInputTokens) * 100
 		if out.CacheRate < 0 {
