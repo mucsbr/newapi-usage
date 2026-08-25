@@ -138,11 +138,6 @@ func (i *Indexer) Start(ctx context.Context) {
 		defer i.wg.Done()
 		i.runLegacyBodyCompression(ctx)
 	}()
-	i.wg.Add(1)
-	go func() {
-		defer i.wg.Done()
-		i.runLegacySecurityAlertSplit(ctx)
-	}()
 }
 
 func (i *Indexer) Close() error {

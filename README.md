@@ -128,7 +128,7 @@ The importer stores an incremental cursor for each JSONL file in SQLite. It scan
 
 The SQLite index stores request bodies plus token ID, key tail, key hash, model, request path, and source file position. It does not store the full API key.
 
-Records with `record_type: "security_alert"` are stored separately from request bodies. They do not participate in request matching or create an extra conversation. The importer links each alert to the original OpenResty request by their shared `request_id`, so an alert appended after the response automatically appears on an already matched NewAPI usage log. Existing alert rows imported by older versions are split out in a one-time background migration when the original JSONL source line is still available.
+Records with `record_type: "security_alert"` are stored separately from request bodies. They do not participate in request matching or create an extra conversation. The importer links each newly ingested alert to the original OpenResty request by their shared `request_id`, so an alert appended after the response automatically appears on an already matched NewAPI usage log.
 
 Matching order in the UI:
 
