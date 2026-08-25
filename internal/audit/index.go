@@ -138,6 +138,11 @@ func (i *Indexer) Start(ctx context.Context) {
 		defer i.wg.Done()
 		i.runLegacyBodyCompression(ctx)
 	}()
+	i.wg.Add(1)
+	go func() {
+		defer i.wg.Done()
+		i.runLegacySecurityAlertSplit(ctx)
+	}()
 }
 
 func (i *Indexer) Close() error {
@@ -230,7 +235,7 @@ func (i *Indexer) Lookup(ctx context.Context, filter LookupFilter) ([]Entry, err
 			return nil, err
 		}
 		if len(items) > 0 {
-			return items, nil
+			return i.withSecurityAlerts(ctx, items)
 		}
 	}
 	if filter.TokenID > 0 && filter.CreatedAt > 0 {
@@ -249,7 +254,7 @@ func (i *Indexer) Lookup(ctx context.Context, filter LookupFilter) ([]Entry, err
 				items[idx].MatchedNote = fmt.Sprintf("same token within +/- %ds around estimated request start %d; model match is ranked first", window, center)
 			}
 			i.rememberLookup(ctx, filter.LogID, items)
-			return items, nil
+			return i.withSecurityAlerts(ctx, items)
 		}
 	}
 	if strings.TrimSpace(filter.RequestID) != "" {
@@ -263,7 +268,7 @@ func (i *Indexer) Lookup(ctx context.Context, filter LookupFilter) ([]Entry, err
 				items[idx].MatchedNote = "exact request_id match"
 			}
 			i.rememberLookup(ctx, filter.LogID, items)
-			return items, nil
+			return i.withSecurityAlerts(ctx, items)
 		}
 	}
 	if filter.TokenID <= 0 {
@@ -277,7 +282,7 @@ func (i *Indexer) Lookup(ctx context.Context, filter LookupFilter) ([]Entry, err
 		items[idx].MatchedBy = "token_latest"
 		items[idx].MatchedNote = "audit log has no usable timestamp match; newest same-token candidates are shown with model match ranked first"
 	}
-	return items, nil
+	return i.withSecurityAlerts(ctx, items)
 }
 
 func (i *Indexer) rememberLookup(ctx context.Context, logID int64, items []Entry) {
@@ -332,7 +337,7 @@ func (i *Indexer) LookupClientInfo(ctx context.Context, filters []LookupFilter) 
 		pending = append(pending, filter)
 	}
 	if len(pending) == 0 {
-		return out, nil
+		return i.withSecurityAlertCounts(ctx, out)
 	}
 
 	candidates, err := i.lookupClientCandidates(ctx, pending)
@@ -353,7 +358,7 @@ func (i *Indexer) LookupClientInfo(ctx context.Context, filters []LookupFilter) 
 		out[filter.LogID] = entry
 		i.rememberLookup(ctx, filter.LogID, []Entry{entry})
 	}
-	return out, nil
+	return i.withSecurityAlertCounts(ctx, out)
 }
 
 func (i *Indexer) Status(ctx context.Context) (Status, error) {
@@ -372,6 +377,9 @@ func (i *Indexer) Status(ctx context.Context) (Status, error) {
 		return out, err
 	}
 	if err := i.db.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(MAX(created_at), 0), COALESCE(MAX(ingested_at), 0) FROM audit_entries`).Scan(&out.IndexedRows, &out.LastCreatedAt, &out.LastIngestedAt); err != nil {
+		return out, err
+	}
+	if err := i.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_security_alerts`).Scan(&out.IndexedAlerts); err != nil {
 		return out, err
 	}
 	i.statusMu.Lock()
@@ -396,6 +404,10 @@ func (i *Indexer) EntryByID(ctx context.Context, id int64) (Entry, error) {
 	}
 	if len(items) == 0 {
 		return Entry{}, sql.ErrNoRows
+	}
+	items, err = i.withSecurityAlerts(ctx, items)
+	if err != nil {
+		return Entry{}, err
 	}
 	return items[0], nil
 }
@@ -447,6 +459,31 @@ func (i *Indexer) initSchema(ctx context.Context) error {
 			matched_note TEXT NOT NULL DEFAULT '',
 			matched_at INTEGER NOT NULL DEFAULT 0
 		)`,
+		`CREATE TABLE IF NOT EXISTS audit_security_alerts (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			source_id TEXT NOT NULL,
+			source_path TEXT NOT NULL,
+			source_line INTEGER NOT NULL,
+			byte_offset INTEGER NOT NULL,
+			request_id TEXT NOT NULL DEFAULT '',
+			request_at INTEGER NOT NULL DEFAULT 0,
+			response_at INTEGER NOT NULL DEFAULT 0,
+			ingested_at INTEGER NOT NULL DEFAULT 0,
+			method TEXT NOT NULL DEFAULT '',
+			path TEXT NOT NULL DEFAULT '',
+			model TEXT NOT NULL DEFAULT '',
+			token_id INTEGER NOT NULL DEFAULT 0,
+			key_tail TEXT NOT NULL DEFAULT '',
+			key_hash TEXT NOT NULL DEFAULT '',
+			response_status INTEGER NOT NULL DEFAULT 0,
+			response_content_type TEXT NOT NULL DEFAULT '',
+			response_body TEXT NOT NULL DEFAULT '',
+			response_total_bytes INTEGER NOT NULL DEFAULT 0,
+			response_truncated INTEGER NOT NULL DEFAULT 0,
+			alert_type TEXT NOT NULL DEFAULT '',
+			matched_text TEXT NOT NULL DEFAULT '',
+			UNIQUE(source_id, source_line)
+		)`,
 		`CREATE TABLE IF NOT EXISTS audit_maintenance (
 			name TEXT PRIMARY KEY,
 			cursor INTEGER NOT NULL DEFAULT 0,
@@ -456,6 +493,8 @@ func (i *Indexer) initSchema(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_audit_entries_token_time ON audit_entries(token_id, created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_entries_request_id ON audit_entries(request_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_entries_model ON audit_entries(model)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_security_alerts_request_id ON audit_security_alerts(request_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_security_alerts_token_time ON audit_security_alerts(token_id, request_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_log_audit_matches_entry ON log_audit_matches(audit_entry_id)`,
 	}
 	for _, statement := range statements {
@@ -733,7 +772,12 @@ func (i *Indexer) ingestPath(ctx context.Context, path string, maxLines int) (fi
 		offset += int64(len(line))
 		result.ProcessedLines++
 		result.BytesRead += int64(len(line))
-		inserted, err := i.insertEntry(ctx, tx, sourceID, path, lineNo, startOffset, record, resolveCache)
+		var inserted bool
+		if record.RecordType == securityAlertRecordType {
+			inserted, err = i.insertSecurityAlert(ctx, tx, sourceID, path, lineNo, startOffset, record, resolveCache)
+		} else {
+			inserted, err = i.insertEntry(ctx, tx, sourceID, path, lineNo, startOffset, record, resolveCache)
+		}
 		if err != nil {
 			return result, err
 		}
@@ -756,29 +800,7 @@ func (i *Indexer) ingestPath(ctx context.Context, path string, maxLines int) (fi
 }
 
 func (i *Indexer) insertEntry(ctx context.Context, tx *sql.Tx, sourceID string, path string, lineNo int64, offset int64, record parsedRecord, resolveCache map[string]ResolvedToken) (bool, error) {
-	keyHash := ""
-	keyTail := ""
-	tokenID := int64(0)
-	if record.APIKey != "" {
-		sum := sha256.Sum256([]byte(record.APIKey))
-		keyHash = hex.EncodeToString(sum[:])
-		keyTail = tail(record.APIKey, 8)
-		if cached, ok := resolveCache[keyHash]; ok {
-			tokenID = cached.TokenID
-			if cached.KeyTail != "" {
-				keyTail = cached.KeyTail
-			}
-		} else if i.resolver != nil {
-			resolved, err := i.resolver(record.APIKey)
-			if err == nil {
-				resolveCache[keyHash] = resolved
-				tokenID = resolved.TokenID
-				if resolved.KeyTail != "" {
-					keyTail = resolved.KeyTail
-				}
-			}
-		}
-	}
+	tokenID, keyTail, keyHash := i.resolveRecordToken(record, resolveCache)
 	bodyGzip, bodyEncoding, err := encodeBody(record.Body)
 	if err != nil {
 		return false, err
@@ -815,6 +837,33 @@ func (i *Indexer) insertEntry(ctx context.Context, tx *sql.Tx, sourceID string, 
 	}
 	rows, err := result.RowsAffected()
 	return rows > 0, err
+}
+
+func (i *Indexer) resolveRecordToken(record parsedRecord, resolveCache map[string]ResolvedToken) (int64, string, string) {
+	keyHash := ""
+	keyTail := ""
+	tokenID := int64(0)
+	if record.APIKey != "" {
+		sum := sha256.Sum256([]byte(record.APIKey))
+		keyHash = hex.EncodeToString(sum[:])
+		keyTail = tail(record.APIKey, 8)
+		if cached, ok := resolveCache[keyHash]; ok {
+			tokenID = cached.TokenID
+			if cached.KeyTail != "" {
+				keyTail = cached.KeyTail
+			}
+		} else if i.resolver != nil {
+			resolved, err := i.resolver(record.APIKey)
+			if err == nil {
+				resolveCache[keyHash] = resolved
+				tokenID = resolved.TokenID
+				if resolved.KeyTail != "" {
+					keyTail = resolved.KeyTail
+				}
+			}
+		}
+	}
+	return tokenID, keyTail, keyHash
 }
 
 func (i *Indexer) stateForPath(ctx context.Context, path string, fileID string, size int64) (fileState, error) {

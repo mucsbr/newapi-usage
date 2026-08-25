@@ -20,28 +20,50 @@ type ResolvedToken struct {
 type TokenResolver func(key string) (ResolvedToken, error)
 
 type Entry struct {
-	ID            int64     `json:"id"`
-	CreatedAt     int64     `json:"created_at"`
-	IngestedAt    int64     `json:"ingested_at"`
-	SourcePath    string    `json:"source_path"`
-	SourceLine    int64     `json:"source_line"`
-	ByteOffset    int64     `json:"byte_offset"`
-	Method        string    `json:"method"`
-	Path          string    `json:"path"`
-	Model         string    `json:"model"`
-	TokenID       int64     `json:"token_id"`
-	KeyTail       string    `json:"key_tail"`
-	KeyHash       string    `json:"key_hash"`
-	UserAgent     string    `json:"user_agent"`
-	ClientName    string    `json:"client_name"`
-	ClientVersion string    `json:"client_version"`
-	ClientVariant string    `json:"client_variant"`
-	RequestID     string    `json:"request_id"`
-	HasTimestamp  bool      `json:"has_timestamp"`
-	Body          string    `json:"body"`
-	Messages      []Message `json:"messages"`
-	MatchedBy     string    `json:"matched_by"`
-	MatchedNote   string    `json:"matched_note"`
+	ID                 int64           `json:"id"`
+	CreatedAt          int64           `json:"created_at"`
+	IngestedAt         int64           `json:"ingested_at"`
+	SourcePath         string          `json:"source_path"`
+	SourceLine         int64           `json:"source_line"`
+	ByteOffset         int64           `json:"byte_offset"`
+	Method             string          `json:"method"`
+	Path               string          `json:"path"`
+	Model              string          `json:"model"`
+	TokenID            int64           `json:"token_id"`
+	KeyTail            string          `json:"key_tail"`
+	KeyHash            string          `json:"key_hash"`
+	UserAgent          string          `json:"user_agent"`
+	ClientName         string          `json:"client_name"`
+	ClientVersion      string          `json:"client_version"`
+	ClientVariant      string          `json:"client_variant"`
+	RequestID          string          `json:"request_id"`
+	HasTimestamp       bool            `json:"has_timestamp"`
+	Body               string          `json:"body"`
+	Messages           []Message       `json:"messages"`
+	SecurityAlertCount int64           `json:"security_alert_count"`
+	SecurityAlerts     []SecurityAlert `json:"security_alerts,omitempty"`
+	MatchedBy          string          `json:"matched_by"`
+	MatchedNote        string          `json:"matched_note"`
+}
+
+type SecurityAlert struct {
+	ID                  int64  `json:"id"`
+	RequestID           string `json:"request_id"`
+	RequestAt           int64  `json:"request_at"`
+	ResponseAt          int64  `json:"response_at"`
+	IngestedAt          int64  `json:"ingested_at"`
+	SourcePath          string `json:"source_path"`
+	SourceLine          int64  `json:"source_line"`
+	Method              string `json:"method"`
+	Path                string `json:"path"`
+	Model               string `json:"model"`
+	ResponseStatus      int    `json:"response_status"`
+	ResponseContentType string `json:"response_content_type"`
+	ResponseBody        string `json:"response_body"`
+	ResponseTotalBytes  int64  `json:"response_total_bytes"`
+	ResponseTruncated   bool   `json:"response_truncated"`
+	AlertType           string `json:"alert_type"`
+	MatchedText         string `json:"matched_text"`
 }
 
 type Message struct {
@@ -69,6 +91,7 @@ type Status struct {
 	LookupWindow   int64  `json:"lookup_window_seconds"`
 	TrackedFiles   int64  `json:"tracked_files"`
 	IndexedRows    int64  `json:"indexed_rows"`
+	IndexedAlerts  int64  `json:"indexed_alerts"`
 	LastCreatedAt  int64  `json:"last_created_at"`
 	LastIngestedAt int64  `json:"last_ingested_at"`
 	LastScanAt     int64  `json:"last_scan_at"`
@@ -76,6 +99,7 @@ type Status struct {
 }
 
 type parsedRecord struct {
+	RecordType    string
 	CreatedAt     int64
 	Method        string
 	Path          string
@@ -88,4 +112,16 @@ type parsedRecord struct {
 	ClientVersion string
 	ClientVariant string
 	Body          string
+	SecurityAlert parsedSecurityAlert
+}
+
+type parsedSecurityAlert struct {
+	ResponseAt          int64
+	ResponseStatus      int
+	ResponseContentType string
+	ResponseBody        string
+	ResponseTotalBytes  int64
+	ResponseTruncated   bool
+	AlertType           string
+	MatchedText         string
 }

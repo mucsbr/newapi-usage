@@ -999,6 +999,17 @@
         gap: 5px;
       }
 
+      .message.security-alert {
+        padding: 10px;
+        border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--line));
+        border-radius: var(--radius-sm);
+        background: color-mix(in srgb, var(--danger) 9%, var(--glass-bg-strong));
+      }
+
+      .message.security-alert .message-role {
+        color: var(--danger);
+      }
+
       .message-role {
         color: var(--muted);
         font-size: 12px;
@@ -2023,7 +2034,11 @@
         }
         el("logsBody").innerHTML = data.items
           .map((item) => {
-            const status = item.type === 5 ? `<span class="pill error">错误</span>` : `<span class="pill success">成功</span>`;
+            const status = item.security_alert_count
+              ? `<span class="pill error">安全告警${item.security_alert_count > 1 ? ` ×${fmt.format(item.security_alert_count)}` : ""}</span>`
+              : item.type === 5
+                ? `<span class="pill error">错误</span>`
+                : `<span class="pill success">成功</span>`;
             return `
               <tr data-log-id="${item.id}" title="点击查看对话">
                 <td>${item.id}</td>
@@ -2088,11 +2103,21 @@
         }
         const timestampNote = item.has_timestamp ? "" : " · no timestamp";
         const client = clientText(item);
-        el("auditNotice").textContent = `${item.matched_by || "matched"}${timestampNote} · ${client} · ${item.matched_note || ""} · ${item.source_path}:${item.source_line}`;
-        el("auditNotice").className = "pill success";
+        const alerts = item.security_alerts || [];
+        el("auditNotice").textContent = `${alerts.length ? `安全告警 ${alerts.length} 条 · ` : ""}${item.matched_by || "matched"}${timestampNote} · ${client} · ${item.matched_note || ""} · ${item.source_path}:${item.source_line}`;
+        el("auditNotice").className = alerts.length ? "pill error" : "pill success";
         const messages = item.messages || [];
+        const alertsHTML = alerts
+          .map(
+            (alert) => `<div class="message security-alert">
+              <div class="message-role">安全告警 · ${escapeHtml(alert.alert_type || "policy_violation")}</div>
+              <div class="message-content">${escapeHtml(alert.matched_text || "请求触发了上游安全策略")}</div>
+              <div class="muted">${alert.response_status ? `HTTP ${alert.response_status}` : ""}${alert.response_at ? ` · 响应时间 ${tsToText(alert.response_at)}` : ""}</div>
+            </div>`,
+          )
+          .join("");
         if (messages.length) {
-          el("auditMessages").innerHTML = messages
+          el("auditMessages").innerHTML = alertsHTML + messages
             .map(
               (message) => `
                 <div class="message">
@@ -2103,7 +2128,7 @@
             )
             .join("");
         } else {
-          el("auditMessages").innerHTML = `<div class="empty">这个请求体没有解析出 messages</div>`;
+          el("auditMessages").innerHTML = alertsHTML + `<div class="empty">这个请求体没有解析出 messages</div>`;
         }
         el("auditRaw").textContent = prettyJSON(item.body || "");
       }

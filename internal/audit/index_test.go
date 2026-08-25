@@ -105,6 +105,147 @@ func TestIndexerIncrementalImport(t *testing.T) {
 	assertIndexedRows(t, idx, 3)
 }
 
+func TestSecurityAlertIsStoredSeparatelyAndAttachedByRequestID(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "request-body.jsonl")
+	indexPath := filepath.Join(dir, "audit.db")
+	requestLine := `{"time":1000,"request_id":"openresty-request-1","method":"POST","path":"/v1/responses","headers":{"authorization":"Bearer sk-prod"},"body":{"model":"gpt-5.4","input":[{"role":"user","content":[{"type":"input_text","text":"hello"}]}]}}` + "\n"
+	if err := os.WriteFile(logPath, []byte(requestLine), 0600); err != nil {
+		t.Fatalf("write request log: %v", err)
+	}
+
+	idx, err := Open(Config{
+		LogGlob:         filepath.Join(dir, "*.jsonl"),
+		IndexDSN:        indexPath,
+		LookupWindow:    2 * time.Second,
+		MaxLinesPerScan: 100,
+	}, func(key string) (ResolvedToken, error) {
+		return ResolvedToken{TokenID: 7, KeyTail: "sk-prod"}, nil
+	})
+	if err != nil {
+		t.Fatalf("open indexer: %v", err)
+	}
+	defer idx.Close()
+
+	if err := idx.ScanOnce(context.Background()); err != nil {
+		t.Fatalf("scan request: %v", err)
+	}
+	items, err := idx.Lookup(context.Background(), LookupFilter{
+		TokenID:   7,
+		Model:     "gpt-5.4",
+		CreatedAt: 1160,
+		UseTime:   160,
+		LogID:     9001,
+	})
+	if err != nil || len(items) != 1 {
+		t.Fatalf("initial lookup: items=%+v err=%v", items, err)
+	}
+	originalEntryID := items[0].ID
+
+	alertLine := `{"record_type":"security_alert","time":1000,"response_time":1160,"request_id":"openresty-request-1","method":"POST","path":"/v1/responses","headers":{"authorization":"Bearer sk-prod"},"body":{"model":"gpt-5.4","input":[{"role":"user","content":[{"type":"input_text","text":"hello"}]}]},"response":{"status":400,"content_type":"text/event-stream; charset=utf-8","body":"event: error","total_bytes":276,"truncated":false},"alert":{"type":"policy_violation","matched_text":"your prompt was flagged as potentially violating our usage policy"}}` + "\n"
+	appendLine(t, logPath, alertLine)
+	if err := idx.ScanOnce(context.Background()); err != nil {
+		t.Fatalf("scan alert: %v", err)
+	}
+
+	status, err := idx.Status(context.Background())
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if status.IndexedRows != 1 || status.IndexedAlerts != 1 {
+		t.Fatalf("unexpected indexed counts: %+v", status)
+	}
+
+	cached, err := idx.Lookup(context.Background(), LookupFilter{LogID: 9001})
+	if err != nil {
+		t.Fatalf("cached lookup: %v", err)
+	}
+	if len(cached) != 1 || cached[0].ID != originalEntryID {
+		t.Fatalf("normal request match changed: %+v", cached)
+	}
+	if cached[0].SecurityAlertCount != 1 || len(cached[0].SecurityAlerts) != 1 {
+		t.Fatalf("security alert not attached: %+v", cached[0])
+	}
+	alert := cached[0].SecurityAlerts[0]
+	if alert.ResponseAt != 1160 || alert.ResponseStatus != 400 || alert.AlertType != "policy_violation" || !strings.Contains(alert.MatchedText, "flagged") {
+		t.Fatalf("unexpected security alert: %+v", alert)
+	}
+
+	clients, err := idx.LookupClientInfo(context.Background(), []LookupFilter{{LogID: 9001}})
+	if err != nil {
+		t.Fatalf("batch lookup: %v", err)
+	}
+	if clients[9001].SecurityAlertCount != 1 {
+		t.Fatalf("batch alert count = %d", clients[9001].SecurityAlertCount)
+	}
+}
+
+func TestLegacySecurityAlertEntryIsSplitWithoutChangingCachedMatch(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "request-body.jsonl")
+	indexPath := filepath.Join(dir, "audit.db")
+	requestLine := `{"time":1000,"request_id":"openresty-request-2","method":"POST","path":"/v1/responses","headers":{"authorization":"Bearer sk-prod"},"body":{"model":"gpt-5.4","input":"hello"}}` + "\n"
+	alertLine := `{"record_type":"security_alert","time":1000,"response_time":1010,"request_id":"openresty-request-2","method":"POST","path":"/v1/responses","headers":{"authorization":"Bearer sk-prod"},"body":{"model":"gpt-5.4","input":"hello"},"response":{"status":400},"alert":{"type":"policy_violation","matched_text":"flagged"}}` + "\n"
+	if err := os.WriteFile(logPath, []byte(requestLine+alertLine), 0600); err != nil {
+		t.Fatalf("write audit log: %v", err)
+	}
+
+	idx, err := Open(Config{IndexDSN: indexPath}, func(key string) (ResolvedToken, error) {
+		return ResolvedToken{TokenID: 7, KeyTail: "sk-prod"}, nil
+	})
+	if err != nil {
+		t.Fatalf("open indexer: %v", err)
+	}
+	defer idx.Close()
+
+	result, err := idx.db.Exec(`INSERT INTO audit_entries (
+		source_id, source_path, source_line, byte_offset, created_at, ingested_at,
+		method, path, model, token_id, key_tail, key_hash, request_id, has_timestamp, body
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"legacy:1", logPath, 1, 0, 1000, 1001, "POST", "/v1/responses", "gpt-5.4", 7, "sk-prod", "hash", "openresty-request-2", 1, `{"model":"gpt-5.4","input":"hello"}`,
+	)
+	if err != nil {
+		t.Fatalf("insert normal request: %v", err)
+	}
+	normalEntryID, _ := result.LastInsertId()
+	result, err = idx.db.Exec(`INSERT INTO audit_entries (
+		source_id, source_path, source_line, byte_offset, created_at, ingested_at,
+		method, path, model, token_id, key_tail, key_hash, request_id, has_timestamp, body
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"legacy:1", logPath, 2, int64(len(requestLine)), 1000, 1011, "POST", "/v1/responses", "gpt-5.4", 7, "sk-prod", "hash", "openresty-request-2", 1, `{"model":"gpt-5.4","input":"hello"}`,
+	)
+	if err != nil {
+		t.Fatalf("insert legacy alert entry: %v", err)
+	}
+	legacyAlertEntryID, _ := result.LastInsertId()
+	if _, err := idx.db.Exec(`INSERT INTO log_audit_matches (log_id, audit_entry_id, matched_by, matched_note, matched_at) VALUES (?, ?, ?, ?, ?)`, 9002, legacyAlertEntryID, "token_time", "legacy", 1011); err != nil {
+		t.Fatalf("insert cached match: %v", err)
+	}
+
+	if err := idx.splitLegacySecurityAlerts(context.Background()); err != nil {
+		t.Fatalf("split legacy alerts: %v", err)
+	}
+	var entryCount int64
+	var alertCount int64
+	if err := idx.db.QueryRow(`SELECT COUNT(*) FROM audit_entries`).Scan(&entryCount); err != nil {
+		t.Fatalf("count entries: %v", err)
+	}
+	if err := idx.db.QueryRow(`SELECT COUNT(*) FROM audit_security_alerts`).Scan(&alertCount); err != nil {
+		t.Fatalf("count alerts: %v", err)
+	}
+	if entryCount != 1 || alertCount != 1 {
+		t.Fatalf("unexpected split counts: entries=%d alerts=%d", entryCount, alertCount)
+	}
+
+	items, err := idx.Lookup(context.Background(), LookupFilter{LogID: 9002})
+	if err != nil {
+		t.Fatalf("cached lookup after split: %v", err)
+	}
+	if len(items) != 1 || items[0].ID != normalEntryID || items[0].SecurityAlertCount != 1 {
+		t.Fatalf("cached match was not repaired: %+v", items)
+	}
+}
+
 func TestIndexerSkipsUnfinishedLine(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "request-body.jsonl")

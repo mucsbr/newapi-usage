@@ -20,6 +20,7 @@ func parseLine(line string, location *time.Location) (parsedRecord, error) {
 	path := firstString(obj, "path", "uri", "request_uri", "requestUri")
 	body := extractBody(obj)
 	bodyObj := parseJSONObject(body)
+	recordType := strings.ToLower(firstString(obj, "record_type", "recordType"))
 	userAgent := firstString(obj, "user_agent", "userAgent", "ua")
 	if userAgent == "" {
 		userAgent = firstHeader(headers, "user-agent")
@@ -28,6 +29,7 @@ func parseLine(line string, location *time.Location) (parsedRecord, error) {
 
 	createdAt, hasTimestamp := extractTimestamp(obj, location)
 	record := parsedRecord{
+		RecordType:    recordType,
 		CreatedAt:     createdAt,
 		HasTimestamp:  hasTimestamp,
 		Method:        strings.ToUpper(firstString(obj, "method", "request_method", "requestMethod")),
@@ -41,10 +43,38 @@ func parseLine(line string, location *time.Location) (parsedRecord, error) {
 		ClientVariant: client.Variant,
 		Body:          body,
 	}
+	if recordType == "security_alert" {
+		response := extractObject(obj, "response")
+		alert := extractObject(obj, "alert")
+		record.SecurityAlert = parsedSecurityAlert{
+			ResponseAt:          extractTimestampKeys(obj, location, "response_time", "responseTime", "response_at", "responseAt"),
+			ResponseStatus:      firstObjectInt(response, "status", "status_code", "statusCode"),
+			ResponseContentType: firstObjectString(response, "content_type", "contentType"),
+			ResponseBody:        firstObjectString(response, "body"),
+			ResponseTotalBytes:  firstObjectInt64(response, "total_bytes", "totalBytes"),
+			ResponseTruncated:   firstObjectBool(response, "truncated"),
+			AlertType:           firstObjectString(alert, "type"),
+			MatchedText:         firstObjectString(alert, "matched_text", "matchedText"),
+		}
+	}
 	if record.RequestID == "" {
 		record.RequestID = firstHeader(headers, "x-oneapi-request-id", "x-request-id", "request-id")
 	}
 	return record, nil
+}
+
+func extractObject(obj map[string]json.RawMessage, keys ...string) map[string]any {
+	for _, key := range keys {
+		raw, ok := getRaw(obj, key)
+		if !ok || len(raw) == 0 || string(raw) == "null" {
+			continue
+		}
+		var value map[string]any
+		if err := json.Unmarshal(raw, &value); err == nil {
+			return value
+		}
+	}
+	return map[string]any{}
 }
 
 func extractBody(obj map[string]json.RawMessage) string {
@@ -194,16 +224,21 @@ func usableKey(value string) bool {
 }
 
 func extractTimestamp(obj map[string]json.RawMessage, location *time.Location) (int64, bool) {
-	for _, key := range []string{"created_at", "createdAt", "timestamp", "time", "ts", "@timestamp"} {
+	ts := extractTimestampKeys(obj, location, "created_at", "createdAt", "timestamp", "time", "ts", "@timestamp")
+	return ts, ts > 0
+}
+
+func extractTimestampKeys(obj map[string]json.RawMessage, location *time.Location, keys ...string) int64 {
+	for _, key := range keys {
 		raw, ok := getRaw(obj, key)
 		if !ok || len(raw) == 0 || string(raw) == "null" {
 			continue
 		}
 		if ts := parseTimestamp(raw, location); ts > 0 {
-			return ts, true
+			return ts
 		}
 	}
-	return 0, false
+	return 0
 }
 
 func parseTimestamp(raw json.RawMessage, location *time.Location) int64 {
@@ -313,12 +348,49 @@ func firstHeader(headers map[string]string, keys ...string) string {
 }
 
 func firstBodyString(obj map[string]any, keys ...string) string {
+	return firstObjectString(obj, keys...)
+}
+
+func firstObjectString(obj map[string]any, keys ...string) string {
 	for _, key := range keys {
 		if value, ok := obj[key].(string); ok && strings.TrimSpace(value) != "" {
 			return strings.TrimSpace(value)
 		}
 	}
 	return ""
+}
+
+func firstObjectInt(obj map[string]any, keys ...string) int {
+	return int(firstObjectInt64(obj, keys...))
+}
+
+func firstObjectInt64(obj map[string]any, keys ...string) int64 {
+	for _, key := range keys {
+		switch value := obj[key].(type) {
+		case float64:
+			return int64(value)
+		case json.Number:
+			parsed, _ := strconv.ParseInt(value.String(), 10, 64)
+			return parsed
+		case string:
+			parsed, _ := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+			return parsed
+		}
+	}
+	return 0
+}
+
+func firstObjectBool(obj map[string]any, keys ...string) bool {
+	for _, key := range keys {
+		switch value := obj[key].(type) {
+		case bool:
+			return value
+		case string:
+			parsed, _ := strconv.ParseBool(strings.TrimSpace(value))
+			return parsed
+		}
+	}
+	return false
 }
 
 func getRaw(obj map[string]json.RawMessage, key string) (json.RawMessage, bool) {

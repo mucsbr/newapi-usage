@@ -203,6 +203,7 @@ func (s *Server) enrichLogsWithAudit(ctx context.Context, items []store.UsageLog
 			items[idx].ClientVersion = entry.ClientVersion
 			items[idx].ClientVariant = entry.ClientVariant
 			items[idx].UserAgent = entry.UserAgent
+			items[idx].SecurityAlertCount = entry.SecurityAlertCount
 		}
 	}
 }
