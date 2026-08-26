@@ -139,7 +139,7 @@ func Load() (Config, error) {
 		IkunSub2APIAccountKey: getEnv("IKUN_SUB2API_ACCOUNT_KEY", "ikun"),
 		IkunLabel:             getEnv("IKUN_LABEL", "Ikun"),
 
-		XFYunEnabled:      getEnvBool("XFYUN_ENABLED", true),
+		XFYunEnabled:      getEnvBool("XFYUN_ENABLED", false),
 		XFYunAPIBase:      getEnv("XFYUN_API_BASE", "https://maas.xfyun.cn"),
 		XFYunLabel:        getEnv("XFYUN_LABEL", "讯飞 MaaS"),
 		XFYunAccountsPath: getEnv("XFYUN_ACCOUNTS_PATH", "/var/lib/newapi-usage/xfyun-accounts.json"),

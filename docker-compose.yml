@@ -78,7 +78,7 @@ services:
       - ./data:/data:ro
       # Set AUDIT_LOG_DIR to the host directory that contains OpenResty *.jsonl files.
       - ${AUDIT_LOG_DIR:-./audit-logs}:/audit-logs:ro
-      - audit-index:/var/lib/newapi-usage
+      - ./audit-index:/var/lib/newapi-usage
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
@@ -96,6 +96,3 @@ networks:
   newapi-network:
     external: true
     name: ${NEWAPI_NETWORK:-new-api_new-api-network}
-
-volumes:
-  audit-index:
