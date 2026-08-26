@@ -175,6 +175,16 @@ OPENCODE_LABEL=OpenCode
 
 The card loads the account list and pricing limits, then shows each account's estimated 5-hour, weekly, and monthly remaining USD quota. Enabled managed accounts have a refresh button that replaces the estimated values with live usage from `/dashboard/api/accounts/{id}/usage/refresh`.
 
+Zhipu GLM Coding Plan quota card:
+
+```env
+ZHIPU_API_BASE=https://open.bigmodel.cn
+ZHIPU_API_KEY=your-zhipu-api-key
+ZHIPU_LABEL=智谱 GLM
+```
+
+The card reads `/api/monitor/usage/quota/limit` and shows remaining model quota for the 5-hour and weekly windows, plus remaining monthly MCP/tool calls and each tool's usage details. Reset timestamps are converted from milliseconds and displayed in the browser's local timezone.
+
 XFYun MaaS coding-plan card:
 
 ```env

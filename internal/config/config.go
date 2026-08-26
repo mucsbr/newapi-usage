@@ -69,6 +69,12 @@ type Config struct {
 	OpenCodeTimeout     time.Duration
 	OpenCodeConcurrency int
 
+	// Zhipu GLM Coding Plan quota.
+	ZhipuAPIBase string
+	ZhipuAPIKey  string
+	ZhipuLabel   string
+	ZhipuTimeout time.Duration
+
 	// Ikun quota enrichment for the matching Sub2API account.
 	IkunAPIBase           string
 	IkunAccessToken       string
@@ -131,6 +137,11 @@ func Load() (Config, error) {
 		OpenCodeLabel:       getEnv("OPENCODE_LABEL", "OpenCode"),
 		OpenCodeTimeout:     time.Duration(getEnvInt("OPENCODE_TIMEOUT_SECONDS", 30)) * time.Second,
 		OpenCodeConcurrency: getEnvInt("OPENCODE_CONCURRENCY", 5),
+
+		ZhipuAPIBase: getEnv("ZHIPU_API_BASE", "https://open.bigmodel.cn"),
+		ZhipuAPIKey:  getEnv("ZHIPU_API_KEY", ""),
+		ZhipuLabel:   getEnv("ZHIPU_LABEL", "智谱 GLM"),
+		ZhipuTimeout: time.Duration(getEnvInt("ZHIPU_TIMEOUT_SECONDS", 15)) * time.Second,
 
 		IkunAPIBase:           getEnv("IKUN_API_BASE", "https://api.ikuncode.cc"),
 		IkunAccessToken:       firstEnv("IKUN_ACCESS_TOKEN", "IKUN_API_KEY"),
@@ -242,6 +253,16 @@ func Load() (Config, error) {
 	if cfg.OpenCodeConcurrency > 20 {
 		cfg.OpenCodeConcurrency = 20
 	}
+	cfg.ZhipuAPIBase = strings.TrimRight(strings.TrimSpace(cfg.ZhipuAPIBase), "/")
+	if cfg.ZhipuAPIBase == "" {
+		cfg.ZhipuAPIBase = "https://open.bigmodel.cn"
+	}
+	if strings.TrimSpace(cfg.ZhipuLabel) == "" {
+		cfg.ZhipuLabel = "智谱 GLM"
+	}
+	if cfg.ZhipuTimeout <= 0 {
+		cfg.ZhipuTimeout = 15 * time.Second
+	}
 	cfg.IkunAPIBase = strings.TrimRight(strings.TrimSpace(cfg.IkunAPIBase), "/")
 	if cfg.IkunAPIBase == "" {
 		cfg.IkunAPIBase = "https://api.ikuncode.cc"
@@ -295,6 +316,10 @@ func (c Config) OpenCodeEnabled() bool {
 		strings.TrimSpace(c.OpenCodePassword) != ""
 }
 
+func (c Config) ZhipuEnabled() bool {
+	return strings.TrimSpace(c.ZhipuAPIKey) != ""
+}
+
 func (c Config) IkunEnabled() bool {
 	return strings.TrimSpace(c.IkunAccessToken) != "" && c.IkunUserID > 0
 }
@@ -305,7 +330,7 @@ func (c Config) XFYunChannelEnabled() bool {
 
 // ChannelsEnabled reports whether the channel balance feature is active at all.
 func (c Config) ChannelsEnabled() bool {
-	return c.DeepSeekEnabled() || c.CPAEnabled() || c.Sub2APIEnabled() || c.OpenCodeEnabled() || c.XFYunChannelEnabled()
+	return c.DeepSeekEnabled() || c.CPAEnabled() || c.Sub2APIEnabled() || c.OpenCodeEnabled() || c.ZhipuEnabled() || c.XFYunChannelEnabled()
 }
 
 func (c Config) Addr() string {

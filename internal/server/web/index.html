@@ -512,6 +512,39 @@
         animation: spin 0.8s linear infinite;
       }
 
+      .zhipu-list {
+        display: grid;
+        gap: 8px;
+        padding-top: 10px;
+        border-top: 1px solid var(--line);
+      }
+
+      .zhipu-limit {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 4px 8px;
+        min-width: 0;
+      }
+
+      .zhipu-limit-name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 12px;
+        font-weight: 650;
+      }
+
+      .zhipu-limit-meta,
+      .zhipu-details {
+        grid-column: 1 / -1;
+        color: var(--muted);
+        font-size: 10px;
+        line-height: 1.35;
+        overflow-wrap: anywhere;
+      }
+
       .sub2-account {
         display: flex;
         align-items: center;
@@ -1452,12 +1485,13 @@
       function channelCardHTML(c) {
         if (c.kind === "sub2api") return sub2apiCardHTML(c);
         if (c.kind === "opencode") return openCodeCardHTML(c);
+        if (c.kind === "zhipu") return zhipuCardHTML(c);
         if (c.kind === "xfyun") return xfyunCardHTML(c);
         return c.kind === "pool" ? poolCardHTML(c) : currencyCardHTML(c);
       }
 
       function cardShell(c, statusPill, bodyHTML) {
-        const kindBadge = c.kind === "sub2api" ? "Sub2API" : c.kind === "opencode" ? "OpenCode" : c.kind === "xfyun" ? "MaaS" : c.kind === "pool" ? "账号池" : "余额";
+        const kindBadge = c.kind === "sub2api" ? "Sub2API" : c.kind === "opencode" ? "OpenCode" : c.kind === "zhipu" ? "GLM" : c.kind === "xfyun" ? "MaaS" : c.kind === "pool" ? "账号池" : "余额";
         return `
           <div class="channel-card">
             <div class="channel-card-head">
@@ -1739,6 +1773,39 @@
         const reset = win.resets_at ? ` · 重置 ${shortTime(win.resets_at)}` : "";
         const title = `${win.name} · ${source} · 已用 $${Number(win.used_usd || 0).toFixed(2)} / $${Number(win.limit_usd || 0).toFixed(2)}${reset}`;
         return `<span class="pill ${cls}" title="${escapeHtml(title)}">${escapeHtml(win.name)} $${Number(win.remaining_usd || 0).toFixed(2)}</span>`;
+      }
+
+      function zhipuCardHTML(c) {
+        if (!c.ok) {
+          return cardShell(c, `<span class="pill error">异常</span>`, `<div class="channel-error">${escapeHtml(c.error || "获取失败")}</div>`);
+        }
+        const summary = c.zhipu || {};
+        const limits = summary.limits || [];
+        const level = String(summary.level || "套餐").toUpperCase();
+        const pill = `<span class="pill success">${escapeHtml(level)}</span>`;
+        const foot = `<div class="pool-foot"><span>更新于 ${tsToText(c.updated_at)}</span><span>剩余额度</span></div>`;
+        const list = limits.length
+          ? `<div class="zhipu-list">${limits.map(zhipuLimitHTML).join("")}</div>`
+          : `<div class="muted">没有额度数据</div>`;
+        return cardShell(c, pill, foot + list);
+      }
+
+      function zhipuLimitHTML(limit) {
+        const remainingPercent = Number(limit.remaining_percent || 0);
+        const cls = remainingPercent <= 10 ? "error" : remainingPercent <= 30 ? "" : "success";
+        const absolute = Number(limit.total || 0) > 0;
+        const value = absolute
+          ? `${fmt.format(Number(limit.remaining || 0))} / ${fmt.format(Number(limit.total || 0))} 次`
+          : `${remainingPercent.toFixed(0)}%`;
+        const reset = limit.next_reset_at ? `下次重置：${resetAtText(limit.next_reset_at)}` : "";
+        const used = absolute
+          ? `已用 ${fmt.format(Number(limit.used || 0))} 次`
+          : `已用 ${Number(limit.used_percent || 0).toFixed(0)}%`;
+        const details = (limit.details || [])
+          .filter((item) => Number(item.usage || 0) > 0)
+          .map((item) => `${item.model_code} ${fmt.format(Number(item.usage || 0))}`)
+          .join(" · ");
+        return `<div class="zhipu-limit"><span class="zhipu-limit-name">${escapeHtml(limit.name || limit.type || "额度")}</span><span class="pill ${cls}" title="${escapeHtml(used)}">${escapeHtml(value)}</span><span class="zhipu-limit-meta">${escapeHtml([used, reset].filter(Boolean).join(" · "))}</span>${details ? `<span class="zhipu-details">${escapeHtml(details)}</span>` : ""}</div>`;
       }
 
       function attachOpenCodeHandlers() {

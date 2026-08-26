@@ -6,6 +6,7 @@ const (
 	KindPool     = "pool"     // CPA-style account pool with quota usage.
 	KindSub2API  = "sub2api"  // Sub2API account list with estimated/live usage.
 	KindOpenCode = "opencode" // OpenCode Go Manager account usage.
+	KindZhipu    = "zhipu"    // Zhipu GLM Coding Plan quota usage.
 	KindXFYun    = "xfyun"    // XFYun MaaS coding-plan package and rate quotas.
 )
 
@@ -34,6 +35,9 @@ type Balance struct {
 
 	// OpenCode Go Manager account channel.
 	OpenCode *OpenCodeSummary `json:"opencode,omitempty"`
+
+	// Zhipu GLM Coding Plan quota channel.
+	Zhipu *ZhipuSummary `json:"zhipu,omitempty"`
 
 	// XFYun MaaS coding-plan channel.
 	XFYun *XFYunSummary `json:"xfyun,omitempty"`
@@ -170,6 +174,30 @@ type OpenCodeUsageWindow struct {
 	UsedPercent      float64 `json:"used_percent"`
 	RemainingPercent float64 `json:"remaining_percent"`
 	ResetsAt         string  `json:"resets_at,omitempty"`
+}
+
+type ZhipuSummary struct {
+	Level  string       `json:"level"`
+	Limits []ZhipuLimit `json:"limits"`
+}
+
+type ZhipuLimit struct {
+	Type             string             `json:"type"`
+	Name             string             `json:"name"`
+	Unit             int                `json:"unit,omitempty"`
+	Number           int                `json:"number,omitempty"`
+	UsedPercent      float64            `json:"used_percent"`
+	RemainingPercent float64            `json:"remaining_percent"`
+	Total            float64            `json:"total,omitempty"`
+	Used             float64            `json:"used,omitempty"`
+	Remaining        float64            `json:"remaining,omitempty"`
+	NextResetAt      int64              `json:"next_reset_at,omitempty"`
+	Details          []ZhipuUsageDetail `json:"details,omitempty"`
+}
+
+type ZhipuUsageDetail struct {
+	ModelCode string  `json:"model_code"`
+	Usage     float64 `json:"usage"`
 }
 
 type XFYunSummary struct {

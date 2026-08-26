@@ -18,6 +18,7 @@ type Manager struct {
 	cpa      *cpaProvider
 	sub2api  *sub2APIProvider
 	opencode *openCodeProvider
+	zhipu    *zhipuProvider
 	xfyun    *xfyunProvider
 }
 
@@ -69,6 +70,14 @@ func New(cfg config.Config) *Manager {
 			Concurrency: cfg.OpenCodeConcurrency,
 		})
 	}
+	if cfg.ZhipuEnabled() {
+		m.zhipu = newZhipu(zhipuConfig{
+			Label:   cfg.ZhipuLabel,
+			BaseURL: cfg.ZhipuAPIBase,
+			APIKey:  cfg.ZhipuAPIKey,
+			Timeout: cfg.ZhipuTimeout,
+		})
+	}
 	if cfg.XFYunChannelEnabled() {
 		m.xfyun = newXFYun(xfyunConfig{
 			Enabled:      cfg.XFYunEnabled,
@@ -84,7 +93,7 @@ func New(cfg config.Config) *Manager {
 
 // Enabled reports whether any channel is configured.
 func (m *Manager) Enabled() bool {
-	return m != nil && (m.deepseek != nil || m.cpa != nil || m.sub2api != nil || m.opencode != nil || m.xfyun != nil)
+	return m != nil && (m.deepseek != nil || m.cpa != nil || m.sub2api != nil || m.opencode != nil || m.zhipu != nil || m.xfyun != nil)
 }
 
 // Start launches background refresh for providers that need it (CPA).
@@ -109,7 +118,7 @@ func (m *Manager) Snapshot(ctx context.Context) []Balance {
 	if m == nil {
 		return []Balance{}
 	}
-	out := make([]Balance, 0, 5)
+	out := make([]Balance, 0, 6)
 	if m.deepseek != nil {
 		out = append(out, m.deepseek.Balance(ctx))
 	}
@@ -121,6 +130,9 @@ func (m *Manager) Snapshot(ctx context.Context) []Balance {
 	}
 	if m.opencode != nil {
 		out = append(out, m.opencode.Balance(ctx))
+	}
+	if m.zhipu != nil {
+		out = append(out, m.zhipu.Balance(ctx))
 	}
 	if m.xfyun != nil {
 		out = append(out, m.xfyun.Balance(ctx))
