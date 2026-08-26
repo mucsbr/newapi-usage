@@ -1117,6 +1117,7 @@
         </div>
         <div class="log-controls">
           <div id="health" class="pill">checking</div>
+          <button id="openSecurityAlerts" class="secondary" type="button">安全告警</button>
           <button id="openReview" class="secondary" type="button">内容审查</button>
           <button id="logout" class="secondary" type="button">退出</button>
         </div>
@@ -2330,6 +2331,9 @@
       });
       el("openReview").addEventListener("click", () => {
         window.location.href = "/review.html";
+      });
+      el("openSecurityAlerts").addEventListener("click", () => {
+        window.location.href = "/security.html";
       });
       el("auditClose").addEventListener("click", closeAuditDialog);
       el("auditModal").addEventListener("click", (event) => {

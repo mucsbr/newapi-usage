@@ -178,6 +178,40 @@ func TestSecurityAlertIsStoredSeparatelyAndAttachedByRequestID(t *testing.T) {
 	if clients[9001].SecurityAlertCount != 1 {
 		t.Fatalf("batch alert count = %d", clients[9001].SecurityAlertCount)
 	}
+
+	page, err := idx.ListSecurityAlerts(context.Background(), SecurityAlertFilter{
+		Start:    999,
+		End:      1001,
+		TokenID:  7,
+		Model:    "gpt-5.4",
+		Query:    "flagged",
+		Page:     1,
+		PageSize: 20,
+	})
+	if err != nil {
+		t.Fatalf("list security alerts: %v", err)
+	}
+	if page.Total != 1 || len(page.Items) != 1 {
+		t.Fatalf("unexpected security alert page: %+v", page)
+	}
+	listed := page.Items[0]
+	if listed.AuditEntryID != originalEntryID || listed.TokenID != 7 || listed.KeyTail != "sk-prod" {
+		t.Fatalf("security alert did not link to original request: %+v", listed)
+	}
+	loaded, err := idx.SecurityAlertByID(context.Background(), listed.ID)
+	if err != nil {
+		t.Fatalf("security alert by id: %v", err)
+	}
+	if loaded.ID != listed.ID || loaded.AuditEntryID != originalEntryID || loaded.RequestID != "openresty-request-1" {
+		t.Fatalf("unexpected security alert detail: %+v", loaded)
+	}
+	empty, err := idx.ListSecurityAlerts(context.Background(), SecurityAlertFilter{TokenID: 8, Page: 1, PageSize: 20})
+	if err != nil {
+		t.Fatalf("list filtered security alerts: %v", err)
+	}
+	if empty.Total != 0 || len(empty.Items) != 0 {
+		t.Fatalf("unexpected filtered alerts: %+v", empty)
+	}
 }
 
 func TestIndexerSkipsUnfinishedLine(t *testing.T) {

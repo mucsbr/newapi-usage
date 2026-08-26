@@ -48,6 +48,7 @@ type Entry struct {
 
 type SecurityAlert struct {
 	ID                  int64  `json:"id"`
+	AuditEntryID        int64  `json:"audit_entry_id"`
 	RequestID           string `json:"request_id"`
 	RequestAt           int64  `json:"request_at"`
 	ResponseAt          int64  `json:"response_at"`
@@ -57,6 +58,9 @@ type SecurityAlert struct {
 	Method              string `json:"method"`
 	Path                string `json:"path"`
 	Model               string `json:"model"`
+	TokenID             int64  `json:"token_id"`
+	KeyName             string `json:"key_name,omitempty"`
+	KeyTail             string `json:"key_tail"`
 	ResponseStatus      int    `json:"response_status"`
 	ResponseContentType string `json:"response_content_type"`
 	ResponseBody        string `json:"response_body"`
@@ -64,6 +68,23 @@ type SecurityAlert struct {
 	ResponseTruncated   bool   `json:"response_truncated"`
 	AlertType           string `json:"alert_type"`
 	MatchedText         string `json:"matched_text"`
+}
+
+type SecurityAlertFilter struct {
+	Start    int64
+	End      int64
+	TokenID  int64
+	Model    string
+	Query    string
+	Page     int
+	PageSize int
+}
+
+type SecurityAlertPage struct {
+	Items    []SecurityAlert `json:"items"`
+	Total    int64           `json:"total"`
+	Page     int             `json:"page"`
+	PageSize int             `json:"page_size"`
 }
 
 type Message struct {

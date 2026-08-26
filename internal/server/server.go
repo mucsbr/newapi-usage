@@ -59,6 +59,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/logs", s.handleLogs)
 	s.mux.HandleFunc("/api/logs/", s.handleLogSubroutes)
 	s.mux.HandleFunc("/api/audit/status", s.handleAuditStatus)
+	s.mux.HandleFunc("/api/security-alerts", s.handleSecurityAlerts)
+	s.mux.HandleFunc("/api/security-alerts/", s.handleSecurityAlertSubroutes)
 	s.mux.HandleFunc("/api/review/config", s.handleReviewConfig)
 	s.mux.HandleFunc("/api/review/config/test", s.handleReviewConfigTest)
 	s.mux.HandleFunc("/api/review/keys", s.handleReviewKeys)
@@ -283,6 +285,104 @@ func (s *Server) handleAuditStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, status)
+}
+
+func (s *Server) handleSecurityAlerts(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	out := securityAlertListResponse{
+		Enabled: s.audit != nil && s.audit.Enabled(),
+		SecurityAlertPage: audit.SecurityAlertPage{
+			Items:    []audit.SecurityAlert{},
+			Page:     clampInt(queryInt(r, "page", 1), 1, 1000000),
+			PageSize: clampInt(queryInt(r, "page_size", 50), 1, 200),
+		},
+	}
+	if !out.Enabled {
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+	if err := s.audit.ScanOnce(r.Context()); err != nil {
+		slog.Warn("audit scan before security alert list failed", "error", err)
+	}
+	page, err := s.audit.ListSecurityAlerts(r.Context(), audit.SecurityAlertFilter{
+		Start:    int64(queryInt(r, "start", 0)),
+		End:      int64(queryInt(r, "end", 0)),
+		TokenID:  int64(queryInt(r, "token_id", 0)),
+		Model:    r.URL.Query().Get("model"),
+		Query:    r.URL.Query().Get("q"),
+		Page:     out.Page,
+		PageSize: out.PageSize,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.enrichSecurityAlertKeys(r.Context(), page.Items)
+	out.SecurityAlertPage = page
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleSecurityAlertSubroutes(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	trimmed := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/security-alerts/"), "/")
+	if trimmed == "keys" {
+		items, err := s.store.TokenOptions(r.Context(), 2000)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, items)
+		return
+	}
+	alertID, err := strconv.ParseInt(trimmed, 10, 64)
+	if err != nil || alertID <= 0 {
+		writeError(w, http.StatusBadRequest, "invalid security alert id")
+		return
+	}
+	if s.audit == nil || !s.audit.Enabled() {
+		writeError(w, http.StatusNotFound, "audit disabled")
+		return
+	}
+	alert, err := s.audit.SecurityAlertByID(r.Context(), alertID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "security alert not found")
+		return
+	}
+	alerts := []audit.SecurityAlert{alert}
+	s.enrichSecurityAlertKeys(r.Context(), alerts)
+	alert = alerts[0]
+	var request *audit.Entry
+	if alert.AuditEntryID > 0 {
+		entry, err := s.audit.EntryByID(r.Context(), alert.AuditEntryID)
+		if err == nil {
+			request = &entry
+		}
+	}
+	writeJSON(w, http.StatusOK, securityAlertDetailResponse{Alert: alert, Request: request})
+}
+
+func (s *Server) enrichSecurityAlertKeys(ctx context.Context, items []audit.SecurityAlert) {
+	if len(items) == 0 {
+		return
+	}
+	options, err := s.store.TokenOptions(ctx, 2000)
+	if err != nil {
+		slog.Warn("security alert key enrichment failed", "error", err)
+		return
+	}
+	names := make(map[int64]string, len(options))
+	for _, option := range options {
+		names[option.TokenID] = option.Name
+	}
+	for idx := range items {
+		items[idx].KeyName = names[items[idx].TokenID]
+	}
 }
 
 func (s *Server) handleChannelsBalance(w http.ResponseWriter, r *http.Request) {
@@ -514,4 +614,14 @@ type logAuditResponse struct {
 	Enabled bool           `json:"enabled"`
 	Log     store.UsageLog `json:"log"`
 	Items   []audit.Entry  `json:"items"`
+}
+
+type securityAlertListResponse struct {
+	Enabled bool `json:"enabled"`
+	audit.SecurityAlertPage
+}
+
+type securityAlertDetailResponse struct {
+	Alert   audit.SecurityAlert `json:"alert"`
+	Request *audit.Entry        `json:"request"`
 }

@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>安全告警</title>
+    <style>
+      :root {
+        --bg: #edf1f6;
+        --surface: rgba(255, 255, 255, 0.78);
+        --solid: rgba(255, 255, 255, 0.95);
+        --text: #182131;
+        --muted: #647086;
+        --line: rgba(53, 67, 91, 0.15);
+        --accent: #087f5b;
+        --accent-soft: rgba(8, 127, 91, 0.12);
+        --bad: #c92a2a;
+        --bad-soft: rgba(201, 42, 42, 0.11);
+        --shadow: 0 16px 44px rgba(31, 44, 68, 0.1);
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #10151c;
+          --surface: rgba(28, 35, 46, 0.82);
+          --solid: rgba(35, 43, 56, 0.95);
+          --text: #f2f5f9;
+          --muted: #aab5c6;
+          --line: rgba(216, 225, 239, 0.14);
+          --accent: #5ed6ad;
+          --accent-soft: rgba(94, 214, 173, 0.12);
+          --bad: #ff8787;
+          --bad-soft: rgba(255, 135, 135, 0.12);
+          --shadow: 0 18px 52px rgba(0, 0, 0, 0.28);
+        }
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 0; }
+      button, input, select { font: inherit; border: 1px solid var(--line); border-radius: 7px; }
+      input, select { height: 36px; padding: 0 10px; color: var(--text); background: var(--solid); outline: none; }
+      input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+      button { height: 36px; padding: 0 13px; border-color: transparent; color: #fff; background: var(--accent); cursor: pointer; font-weight: 650; }
+      button.secondary { color: var(--text); background: var(--solid); border-color: var(--line); }
+      button:disabled { opacity: 0.5; cursor: default; }
+      h1, h2, h3, p { margin: 0; }
+      h1 { font-size: 24px; }
+      h2 { font-size: 16px; }
+      h3 { font-size: 13px; }
+      .hidden { display: none !important; }
+      .shell { width: min(1500px, calc(100vw - 28px)); margin: 0 auto; }
+      .glass { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); backdrop-filter: blur(24px) saturate(150%); -webkit-backdrop-filter: blur(24px) saturate(150%); }
+      header { position: sticky; top: 0; z-index: 20; background: rgba(237, 241, 246, 0.8); border-bottom: 1px solid var(--line); backdrop-filter: blur(22px) saturate(150%); -webkit-backdrop-filter: blur(22px) saturate(150%); }
+      @media (prefers-color-scheme: dark) { header { background: rgba(16, 21, 28, 0.82); } }
+      .topbar { min-height: 68px; display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+      .top-actions, .pagination { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+      main { padding: 16px 0 36px; display: grid; gap: 14px; }
+      .muted { color: var(--muted); font-size: 12px; }
+      .pill { display: inline-flex; align-items: center; min-height: 22px; padding: 2px 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: var(--solid); font-size: 11px; white-space: nowrap; }
+      .pill.success { color: var(--accent); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+      .pill.error { color: var(--bad); background: var(--bad-soft); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
+      .filters { padding: 12px; display: grid; grid-template-columns: repeat(2, minmax(170px, 0.8fr)) minmax(170px, 1fr) minmax(170px, 1fr) minmax(220px, 1.3fr) auto auto; gap: 10px; align-items: end; }
+      label { min-width: 0; display: grid; gap: 6px; color: var(--muted); font-size: 12px; }
+      .section { overflow: hidden; }
+      .section-head { min-height: 54px; padding: 12px 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--line); }
+      .table-wrap { overflow: auto; }
+      table { width: 100%; min-width: 1220px; border-collapse: collapse; font-size: 12px; }
+      th, td { padding: 10px 11px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+      th { position: sticky; top: 0; z-index: 2; color: var(--muted); background: var(--solid); font-weight: 600; }
+      tbody tr { cursor: pointer; }
+      tbody tr:hover { background: var(--accent-soft); }
+      tbody tr:last-child td { border-bottom: 0; }
+      .reason { max-width: 420px; overflow: hidden; text-overflow: ellipsis; }
+      .request-id { max-width: 260px; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+      .empty { padding: 36px; text-align: center; color: var(--muted); }
+      .pagination { justify-content: flex-end; padding: 10px 14px; border-top: 1px solid var(--line); }
+      .pagination button { height: 30px; padding: 0 10px; }
+      .modal { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 18px; background: rgba(6, 10, 16, 0.58); }
+      .modal-panel { width: min(1180px, 100%); max-height: min(880px, calc(100vh - 36px)); overflow: auto; }
+      .modal-body { padding: 14px; display: grid; gap: 14px; }
+      .alert-box { padding: 12px; display: grid; gap: 7px; border: 1px solid color-mix(in srgb, var(--bad) 45%, var(--line)); border-radius: 7px; background: var(--bad-soft); }
+      .alert-box h3 { color: var(--bad); }
+      .detail-grid { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 14px; }
+      .detail-block { min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 7px; background: var(--solid); }
+      .detail-block h3 { padding: 10px 12px; border-bottom: 1px solid var(--line); }
+      .conversation { padding: 12px; display: grid; gap: 10px; }
+      .message { display: grid; gap: 5px; }
+      .message-role { color: var(--muted); font-size: 11px; text-transform: uppercase; }
+      .message-content { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; }
+      pre { margin: 0; padding: 12px; max-height: 620px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; line-height: 1.5; }
+      @media (max-width: 1100px) { .filters { grid-template-columns: repeat(3, minmax(0, 1fr)); } .detail-grid { grid-template-columns: 1fr; } }
+      @media (max-width: 700px) { .shell { width: min(100vw - 18px, 1500px); } .topbar { align-items: flex-start; padding: 10px 0; } .filters { grid-template-columns: 1fr; } .filters button { width: 100%; } }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="shell topbar">
+        <div><h1>安全告警</h1><p class="muted">策略触发记录</p></div>
+        <div class="top-actions"><span id="pageStatus" class="pill">连接中</span><button id="back" class="secondary" type="button">返回总览</button></div>
+      </div>
+    </header>
+    <main class="shell">
+      <section class="filters glass">
+        <label>开始时间<input id="start" type="datetime-local" /></label>
+        <label>结束时间<input id="end" type="datetime-local" /></label>
+        <label>Key<select id="key"><option value="">全部 Key</option></select></label>
+        <label>模型<input id="model" type="search" placeholder="模型名称" /></label>
+        <label>关键词<input id="query" type="search" placeholder="请求 ID / 命中原因" /></label>
+        <button id="refresh" type="button">刷新</button>
+        <button id="reset" class="secondary" type="button">重置</button>
+      </section>
+      <section class="section glass">
+        <div class="section-head"><div><h2>告警记录</h2><p id="resultMeta" class="muted">0 条</p></div><span id="pageInfo" class="pill">1 / 1</span></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>请求时间</th><th>响应时间</th><th>Key</th><th>模型</th><th>类型</th><th>HTTP</th><th>命中原因</th><th>Request ID</th></tr></thead>
+            <tbody id="alertsBody"><tr><td colspan="8" class="empty">加载中</td></tr></tbody>
+          </table>
+        </div>
+        <div class="pagination"><button id="prev" class="secondary" type="button">上一页</button><button id="next" class="secondary" type="button">下一页</button></div>
+      </section>
+    </main>
+    <div id="detailModal" class="modal hidden" role="dialog" aria-modal="true">
+      <div class="modal-panel glass">
+        <div class="section-head"><div><h2>告警请求</h2><p id="detailMeta" class="muted">-</p></div><button id="closeDetail" class="secondary" type="button">关闭</button></div>
+        <div class="modal-body">
+          <div id="alertDetail" class="alert-box"></div>
+          <div class="detail-grid">
+            <div class="detail-block"><h3>Messages</h3><div id="messages" class="conversation"></div></div>
+            <div class="detail-block"><h3>Raw JSON</h3><pre id="rawBody"></pre></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script>
+      const state = { page: 1, pageSize: 50, totalPages: 1 };
+      const el = (id) => document.getElementById(id);
+      const fmt = new Intl.NumberFormat("zh-CN");
+      const escapeHtml = (value) => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
+      const tsText = (ts) => ts ? new Date(ts * 1000).toLocaleString("zh-CN", { hour12: false }) : "-";
+      const dateToUnix = (value) => { const ms = new Date(value).getTime(); return Number.isFinite(ms) ? Math.floor(ms / 1000) : 0; };
+      const unixToInput = (ts) => { const d = new Date(ts * 1000); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); };
+      const setDefaultRange = () => { const now = Math.floor(Date.now() / 1000); el("start").value = unixToInput(now - 86400); el("end").value = unixToInput(now + 3600); };
+      const alertTypeText = (value) => ({ policy_violation: "策略违规" })[value] || value || "安全策略";
+      async function api(path) { const response = await fetch(path, { credentials: "same-origin" }); const data = await response.json().catch(() => ({})); if (!response.ok) { if (response.status === 401) window.location.href = "/"; throw new Error(data?.error?.message || response.statusText); } return data; }
+      async function loadKeys() { const items = await api("/api/security-alerts/keys"); el("key").innerHTML = `<option value="">全部 Key</option>${items.map((item) => `<option value="${item.token_id}">${escapeHtml(item.key_name || `Token #${item.token_id}`)}</option>`).join("")}`; }
+      function listParams() { const params = new URLSearchParams({ page: state.page, page_size: state.pageSize }); const start = dateToUnix(el("start").value), end = dateToUnix(el("end").value); if (start) params.set("start", start); if (end) params.set("end", end); if (el("key").value) params.set("token_id", el("key").value); if (el("model").value.trim()) params.set("model", el("model").value.trim()); if (el("query").value.trim()) params.set("q", el("query").value.trim()); return params; }
+      async function loadAlerts() { el("alertsBody").innerHTML = `<tr><td colspan="8" class="empty">加载中</td></tr>`; const data = await api(`/api/security-alerts?${listParams()}`); if (!data.enabled) { el("alertsBody").innerHTML = `<tr><td colspan="8" class="empty">审计日志未启用</td></tr>`; return; } renderAlerts(data); }
+      function renderAlerts(data) { state.totalPages = Math.max(1, Math.ceil((data.total || 0) / data.page_size)); el("resultMeta").textContent = `${fmt.format(data.total || 0)} 条`; el("pageInfo").textContent = `${data.page} / ${state.totalPages}`; el("prev").disabled = data.page <= 1; el("next").disabled = data.page >= state.totalPages; if (!data.items?.length) { el("alertsBody").innerHTML = `<tr><td colspan="8" class="empty">没有安全告警</td></tr>`; return; } el("alertsBody").innerHTML = data.items.map((item) => `<tr data-alert-id="${item.id}"><td>${tsText(item.request_at)}</td><td>${tsText(item.response_at)}</td><td>${escapeHtml(item.key_name || `Token #${item.token_id}`)}</td><td>${escapeHtml(item.model || "-")}</td><td><span class="pill error">${escapeHtml(alertTypeText(item.alert_type))}</span></td><td>${item.response_status || "-"}</td><td class="reason" title="${escapeHtml(item.matched_text || "")}">${escapeHtml(item.matched_text || "-")}</td><td class="request-id" title="${escapeHtml(item.request_id || "")}">${escapeHtml(item.request_id || "-")}</td></tr>`).join(""); document.querySelectorAll("[data-alert-id]").forEach((row) => row.addEventListener("click", () => openDetail(row.dataset.alertId).catch(showError))); }
+      async function openDetail(id) { el("detailModal").classList.remove("hidden"); el("detailMeta").textContent = `Alert #${id}`; el("alertDetail").innerHTML = `<span class="muted">加载中</span>`; el("messages").innerHTML = ""; el("rawBody").textContent = ""; const data = await api(`/api/security-alerts/${id}`), alert = data.alert || {}, request = data.request; el("detailMeta").textContent = `${tsText(alert.request_at)} · ${alert.key_name || `Token #${alert.token_id}`} · ${alert.model || "-"}`; el("alertDetail").innerHTML = `<h3>${escapeHtml(alertTypeText(alert.alert_type))}</h3><div>${escapeHtml(alert.matched_text || "请求触发了安全策略")}</div><div class="muted">${alert.response_status ? `HTTP ${alert.response_status} · ` : ""}${tsText(alert.response_at)} · ${escapeHtml(alert.request_id || "")}</div>`; if (!request) { el("messages").innerHTML = `<div class="empty">未关联到原始请求</div>`; return; } const messages = request.messages || []; el("messages").innerHTML = messages.length ? messages.map((message) => `<div class="message"><div class="message-role">${escapeHtml(message.role || "message")}</div><div class="message-content">${escapeHtml(message.content || "")}</div></div>`).join("") : `<div class="empty">请求体没有解析出 Messages</div>`; el("rawBody").textContent = prettyJSON(request.body || ""); }
+      function prettyJSON(value) { try { return JSON.stringify(JSON.parse(value), null, 2); } catch { return value; } }
+      function closeDetail() { el("detailModal").classList.add("hidden"); }
+      function showError(error) { console.error(error); el("pageStatus").textContent = error.message; el("pageStatus").className = "pill error"; }
+      async function init() { const auth = await api("/api/auth/status"); if (!auth.authenticated) { window.location.href = "/"; return; } setDefaultRange(); await loadKeys(); await loadAlerts(); el("pageStatus").textContent = "已连接"; el("pageStatus").className = "pill success"; }
+      el("back").addEventListener("click", () => window.location.href = "/");
+      el("refresh").addEventListener("click", () => { state.page = 1; loadAlerts().catch(showError); });
+      el("reset").addEventListener("click", () => { setDefaultRange(); el("key").value = ""; el("model").value = ""; el("query").value = ""; state.page = 1; loadAlerts().catch(showError); });
+      el("key").addEventListener("change", () => { state.page = 1; loadAlerts().catch(showError); });
+      ["model", "query"].forEach((id) => el(id).addEventListener("keydown", (event) => { if (event.key === "Enter") { state.page = 1; loadAlerts().catch(showError); } }));
+      el("prev").addEventListener("click", () => { if (state.page > 1) { state.page--; loadAlerts().catch(showError); } });
+      el("next").addEventListener("click", () => { if (state.page < state.totalPages) { state.page++; loadAlerts().catch(showError); } });
+      el("closeDetail").addEventListener("click", closeDetail);
+      el("detailModal").addEventListener("click", (event) => { if (event.target === el("detailModal")) closeDetail(); });
+      document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeDetail(); });
+      init().catch(showError);
+    </script>
+  </body>
+</html>

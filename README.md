@@ -130,6 +130,8 @@ The SQLite index stores request bodies plus token ID, key tail, key hash, model,
 
 Records with `record_type: "security_alert"` are stored separately from request bodies. They do not participate in request matching or create an extra conversation. The importer links each newly ingested alert to the original OpenResty request by their shared `request_id`, so an alert appended after the response automatically appears on an already matched NewAPI usage log.
 
+Administrators can open `/security.html` to view all security alerts in one paginated list, filter by time, key, model, or keyword, and open the associated original request.
+
 Matching order in the UI:
 
 1. `logs.token_id + (logs.created_at - logs.use_time)` against timestamped audit rows, with the same model ranked first. `AUDIT_LOOKUP_WINDOW_SECONDS` is applied around that estimated request start time.

@@ -98,22 +98,124 @@ func (i *Indexer) securityAlertsByRequestID(ctx context.Context, requestIDs []st
 	for _, requestID := range requestIDs {
 		args = append(args, requestID)
 	}
-	query := fmt.Sprintf(`SELECT id, request_id, request_at, response_at, ingested_at,
-		source_path, source_line, method, path, model, response_status,
-		response_content_type, response_body, response_total_bytes,
-		response_truncated, alert_type, matched_text
+	query := fmt.Sprintf(`SELECT %s
 		FROM audit_security_alerts
 		WHERE request_id IN (%s)
-		ORDER BY response_at, id`, placeholders(len(requestIDs)))
+		ORDER BY response_at, id`, securityAlertSelectColumns("audit_security_alerts"), placeholders(len(requestIDs)))
 	rows, err := i.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+	items, err := scanSecurityAlerts(rows)
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range items {
+		out[item.RequestID] = append(out[item.RequestID], item)
+	}
+	return out, nil
+}
+
+func (i *Indexer) ListSecurityAlerts(ctx context.Context, filter SecurityAlertFilter) (SecurityAlertPage, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if filter.Page <= 0 {
+		filter.Page = 1
+	}
+	if filter.PageSize <= 0 || filter.PageSize > 200 {
+		filter.PageSize = 50
+	}
+	conditions := []string{"1 = 1"}
+	args := make([]any, 0)
+	if filter.Start > 0 {
+		conditions = append(conditions, "a.request_at >= ?")
+		args = append(args, filter.Start)
+	}
+	if filter.End > 0 {
+		conditions = append(conditions, "a.request_at <= ?")
+		args = append(args, filter.End)
+	}
+	if filter.TokenID > 0 {
+		conditions = append(conditions, "a.token_id = ?")
+		args = append(args, filter.TokenID)
+	}
+	if model := strings.TrimSpace(filter.Model); model != "" {
+		conditions = append(conditions, "a.model = ?")
+		args = append(args, model)
+	}
+	if query := strings.ToLower(strings.TrimSpace(filter.Query)); query != "" {
+		pattern := "%" + query + "%"
+		conditions = append(conditions, `(LOWER(a.request_id) LIKE ? OR LOWER(a.matched_text) LIKE ? OR LOWER(a.alert_type) LIKE ? OR LOWER(a.model) LIKE ? OR LOWER(a.key_tail) LIKE ?)`)
+		args = append(args, pattern, pattern, pattern, pattern, pattern)
+	}
+	where := "WHERE " + strings.Join(conditions, " AND ")
+
+	var total int64
+	if err := i.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_security_alerts a `+where, args...).Scan(&total); err != nil {
+		return SecurityAlertPage{}, err
+	}
+	offset := (filter.Page - 1) * filter.PageSize
+	queryArgs := append([]any{}, args...)
+	queryArgs = append(queryArgs, filter.PageSize, offset)
+	query := fmt.Sprintf(`SELECT %s
+		FROM audit_security_alerts a
+		%s
+		ORDER BY CASE WHEN a.response_at > 0 THEN a.response_at ELSE a.request_at END DESC, a.id DESC
+		LIMIT ? OFFSET ?`, securityAlertSelectColumns("a"), where)
+	rows, err := i.db.QueryContext(ctx, query, queryArgs...)
+	if err != nil {
+		return SecurityAlertPage{}, err
+	}
+	defer rows.Close()
+	items, err := scanSecurityAlerts(rows)
+	if err != nil {
+		return SecurityAlertPage{}, err
+	}
+	return SecurityAlertPage{Items: items, Total: total, Page: filter.Page, PageSize: filter.PageSize}, nil
+}
+
+func (i *Indexer) SecurityAlertByID(ctx context.Context, id int64) (SecurityAlert, error) {
+	if i == nil || id <= 0 {
+		return SecurityAlert{}, sql.ErrNoRows
+	}
+	rows, err := i.db.QueryContext(ctx, `SELECT `+securityAlertSelectColumns("a")+` FROM audit_security_alerts a WHERE a.id = ? LIMIT 1`, id)
+	if err != nil {
+		return SecurityAlert{}, err
+	}
+	defer rows.Close()
+	items, err := scanSecurityAlerts(rows)
+	if err != nil {
+		return SecurityAlert{}, err
+	}
+	if len(items) == 0 {
+		return SecurityAlert{}, sql.ErrNoRows
+	}
+	return items[0], nil
+}
+
+func securityAlertSelectColumns(alias string) string {
+	prefix := ""
+	if alias != "" {
+		prefix = alias + "."
+	}
+	return fmt.Sprintf(`%[1]sid,
+		COALESCE((SELECT MIN(e.id) FROM audit_entries e WHERE e.request_id = %[1]srequest_id), 0),
+		%[1]srequest_id, %[1]srequest_at, %[1]sresponse_at, %[1]singested_at,
+		%[1]ssource_path, %[1]ssource_line, %[1]smethod, %[1]spath, %[1]smodel,
+		%[1]stoken_id, %[1]skey_tail, %[1]sresponse_status, %[1]sresponse_content_type,
+		%[1]sresponse_body, %[1]sresponse_total_bytes, %[1]sresponse_truncated,
+		%[1]salert_type, %[1]smatched_text`, prefix)
+}
+
+func scanSecurityAlerts(rows *sql.Rows) ([]SecurityAlert, error) {
+	items := make([]SecurityAlert, 0)
 	for rows.Next() {
 		var item SecurityAlert
 		if err := rows.Scan(
 			&item.ID,
+			&item.AuditEntryID,
 			&item.RequestID,
 			&item.RequestAt,
 			&item.ResponseAt,
@@ -123,6 +225,8 @@ func (i *Indexer) securityAlertsByRequestID(ctx context.Context, requestIDs []st
 			&item.Method,
 			&item.Path,
 			&item.Model,
+			&item.TokenID,
+			&item.KeyTail,
 			&item.ResponseStatus,
 			&item.ResponseContentType,
 			&item.ResponseBody,
@@ -133,9 +237,9 @@ func (i *Indexer) securityAlertsByRequestID(ctx context.Context, requestIDs []st
 		); err != nil {
 			return nil, err
 		}
-		out[item.RequestID] = append(out[item.RequestID], item)
+		items = append(items, item)
 	}
-	return out, rows.Err()
+	return items, rows.Err()
 }
 
 func (i *Indexer) insertSecurityAlert(ctx context.Context, tx *sql.Tx, sourceID string, path string, lineNo int64, offset int64, record parsedRecord, resolveCache map[string]ResolvedToken) (bool, error) {
