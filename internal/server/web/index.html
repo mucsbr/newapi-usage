@@ -1581,6 +1581,8 @@
       async function loadChannel(channel, force = false) {
         const descriptor = channelState.descriptors.find((item) => item.channel === channel);
         if (!descriptor) return;
+        const startedAt = performance.now();
+        const initialSkeleton = Boolean(document.querySelector(`[data-channel-card="${CSS.escape(channel)}"] .channel-skeleton`));
         const requestID = (channelState.requests.get(channel) || 0) + 1;
         channelState.requests.set(channel, requestID);
         setChannelLoading(channel, true);
@@ -1589,6 +1591,7 @@
         try {
           const balance = await api(`/api/channels/${encodeURIComponent(channel)}/balance`, params);
           if (channelState.requests.get(channel) !== requestID) return;
+          await keepChannelAnimationVisible(startedAt, initialSkeleton || force);
           renderChannelCard(balance);
           if (!balance.ok && balance.error === "refreshing") {
             const retries = channelState.retries.get(channel) || 0;
@@ -1601,7 +1604,16 @@
           }
         } catch (error) {
           if (channelState.requests.get(channel) !== requestID) return;
+          await keepChannelAnimationVisible(startedAt, initialSkeleton || force);
           renderChannelCard({ channel, label: descriptor.label, kind: descriptor.kind, ok: false, error: error.message });
+        }
+      }
+
+      async function keepChannelAnimationVisible(startedAt, enabled) {
+        if (!enabled) return;
+        const remaining = 320 - (performance.now() - startedAt);
+        if (remaining > 0) {
+          await new Promise((resolve) => setTimeout(resolve, remaining));
         }
       }
 
