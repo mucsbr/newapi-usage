@@ -52,8 +52,16 @@ type deepSeekResponse struct {
 }
 
 func (d *deepSeekProvider) Balance(ctx context.Context) Balance {
+	return d.balance(ctx, false)
+}
+
+func (d *deepSeekProvider) Refresh(ctx context.Context) Balance {
+	return d.balance(ctx, true)
+}
+
+func (d *deepSeekProvider) balance(ctx context.Context, force bool) Balance {
 	d.mu.Lock()
-	if d.hasCached && time.Since(d.cachedAt) < d.ttl {
+	if !force && d.hasCached && time.Since(d.cachedAt) < d.ttl {
 		cached := d.cached
 		d.mu.Unlock()
 		return cached

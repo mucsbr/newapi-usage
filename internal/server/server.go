@@ -69,10 +69,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/review/jobs/", s.handleReviewJob)
 	s.mux.HandleFunc("/api/review/entries/", s.handleReviewEntry)
 	s.mux.HandleFunc("/api/channels/balance", s.handleChannelsBalance)
+	s.mux.HandleFunc("/api/channels", s.handleChannelsManifest)
 	s.mux.HandleFunc("/api/channels/sub2api/accounts/", s.handleSub2APIUsage)
 	s.mux.HandleFunc("/api/channels/opencode/accounts/", s.handleOpenCodeUsage)
 	s.mux.HandleFunc("/api/channels/xfyun/accounts", s.handleXFYunAccounts)
 	s.mux.HandleFunc("/api/channels/xfyun/accounts/", s.handleXFYunAccount)
+	s.mux.HandleFunc("/api/channels/", s.handleChannelSubroutes)
 	s.mux.HandleFunc("/api/keys/", s.handleKeySubroutes)
 }
 
@@ -398,6 +400,45 @@ func (s *Server) handleChannelsBalance(w http.ResponseWriter, r *http.Request) {
 		"enabled":  s.channels != nil && s.channels.Enabled(),
 		"channels": items,
 	})
+}
+
+func (s *Server) handleChannelsManifest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	items := []channels.Descriptor{}
+	if s.channels != nil && s.channels.Enabled() {
+		items = s.channels.Descriptors()
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"enabled":  s.channels != nil && s.channels.Enabled(),
+		"channels": items,
+	})
+}
+
+func (s *Server) handleChannelSubroutes(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	trimmed := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/channels/"), "/")
+	parts := strings.Split(trimmed, "/")
+	if len(parts) != 2 || parts[1] != "balance" || parts[0] == "" {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	if s.channels == nil || !s.channels.Enabled() {
+		writeError(w, http.StatusNotFound, "channels not configured")
+		return
+	}
+	force := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("force")), "true")
+	data, err := s.channels.ChannelBalance(r.Context(), parts[0], force)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, data)
 }
 
 func (s *Server) handleSub2APIUsage(w http.ResponseWriter, r *http.Request) {

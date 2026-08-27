@@ -83,8 +83,16 @@ func newXFYun(cfg xfyunConfig) *xfyunProvider {
 }
 
 func (x *xfyunProvider) Balance(ctx context.Context) Balance {
+	return x.balance(ctx, false)
+}
+
+func (x *xfyunProvider) Refresh(ctx context.Context) Balance {
+	return x.balance(ctx, true)
+}
+
+func (x *xfyunProvider) balance(ctx context.Context, force bool) Balance {
 	x.mu.Lock()
-	if x.hasCached && time.Since(x.cachedAt) < x.ttl {
+	if !force && x.hasCached && time.Since(x.cachedAt) < x.ttl {
 		cached := x.cached
 		x.mu.Unlock()
 		return cached

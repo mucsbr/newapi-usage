@@ -75,8 +75,16 @@ func newZhipu(cfg zhipuConfig) *zhipuProvider {
 }
 
 func (z *zhipuProvider) Balance(ctx context.Context) Balance {
+	return z.balance(ctx, false)
+}
+
+func (z *zhipuProvider) Refresh(ctx context.Context) Balance {
+	return z.balance(ctx, true)
+}
+
+func (z *zhipuProvider) balance(ctx context.Context, force bool) Balance {
 	z.mu.Lock()
-	if z.hasCached && time.Since(z.cachedAt) < z.ttl {
+	if !force && z.hasCached && time.Since(z.cachedAt) < z.ttl {
 		cached := z.cached
 		z.mu.Unlock()
 		return cached

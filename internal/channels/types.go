@@ -43,6 +43,12 @@ type Balance struct {
 	XFYun *XFYunSummary `json:"xfyun,omitempty"`
 }
 
+type Descriptor struct {
+	Channel string `json:"channel"`
+	Label   string `json:"label"`
+	Kind    string `json:"kind"`
+}
+
 // CurrencyBalance mirrors one entry of DeepSeek's balance_infos array. Amounts
 // are kept as strings to preserve the exact precision returned by the API.
 type CurrencyBalance struct {

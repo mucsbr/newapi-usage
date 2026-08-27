@@ -105,6 +105,14 @@ func (i *ikunProvider) Quota(ctx context.Context) (Sub2APIAccountQuota, error) {
 	return quota, nil
 }
 
+func (i *ikunProvider) Invalidate() {
+	i.mu.Lock()
+	i.hasCached = false
+	i.cached = Sub2APIAccountQuota{}
+	i.cachedAt = time.Time{}
+	i.mu.Unlock()
+}
+
 func (i *ikunProvider) fetch(ctx context.Context) (Sub2APIAccountQuota, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, i.baseURL+"/api/user/self", nil)
 	if err != nil {

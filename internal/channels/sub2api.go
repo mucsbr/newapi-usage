@@ -79,6 +79,13 @@ func (s *sub2APIProvider) Balance(ctx context.Context) Balance {
 	}
 }
 
+func (s *sub2APIProvider) Refresh(ctx context.Context) Balance {
+	if s.ikun != nil {
+		s.ikun.Invalidate()
+	}
+	return s.Balance(ctx)
+}
+
 func (s *sub2APIProvider) FetchUsage(ctx context.Context, accountID int64, force bool, timezone string) (Sub2APIUsage, error) {
 	if accountID <= 0 {
 		return Sub2APIUsage{}, fmt.Errorf("invalid account id")

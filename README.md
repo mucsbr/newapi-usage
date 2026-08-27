@@ -207,7 +207,9 @@ GET /api/keys/{token_id}/models
 GET /api/logs?token_id=123&type=success&page=1&page_size=100
 GET /api/logs/{log_id}/audit
 GET /api/audit/status
+GET /api/channels
 GET /api/channels/balance
+GET /api/channels/{channel}/balance?force=true
 GET /api/channels/sub2api/accounts/{account_id}/usage?force=true&timezone=Asia/Shanghai
 POST /api/channels/opencode/accounts/{account_id}/usage/refresh
 POST /api/channels/xfyun/accounts
@@ -216,6 +218,8 @@ DELETE /api/channels/xfyun/accounts/{account_id}
 ```
 
 Time parameters are Unix timestamps in seconds.
+
+The dashboard first loads `GET /api/channels` to render every configured card skeleton, then requests each channel balance independently. `force=true` refreshes only the selected card and bypasses that provider's cache when applicable.
 
 ## Self-Service Usage Page
 

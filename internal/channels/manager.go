@@ -10,6 +10,7 @@ import (
 var errSub2APINotConfigured = errors.New("sub2api is not configured")
 var errOpenCodeNotConfigured = errors.New("opencode is not configured")
 var errXFYunNotConfigured = errors.New("xfyun is not configured")
+var errChannelNotConfigured = errors.New("channel is not configured")
 
 // Manager owns the channel balance providers. DeepSeek is fetched live (cheap),
 // while CPA runs a background refresh and is read from cache.
@@ -138,6 +139,87 @@ func (m *Manager) Snapshot(ctx context.Context) []Balance {
 		out = append(out, m.xfyun.Balance(ctx))
 	}
 	return out
+}
+
+func (m *Manager) Descriptors() []Descriptor {
+	if m == nil {
+		return []Descriptor{}
+	}
+	out := make([]Descriptor, 0, 6)
+	if m.deepseek != nil {
+		out = append(out, Descriptor{Channel: "deepseek", Label: m.deepseek.label, Kind: KindCurrency})
+	}
+	if m.cpa != nil {
+		out = append(out, Descriptor{Channel: "cpa", Label: m.cpa.label, Kind: KindPool})
+	}
+	if m.sub2api != nil {
+		out = append(out, Descriptor{Channel: "sub2api", Label: m.sub2api.label, Kind: KindSub2API})
+	}
+	if m.opencode != nil {
+		out = append(out, Descriptor{Channel: "opencode", Label: m.opencode.label, Kind: KindOpenCode})
+	}
+	if m.zhipu != nil {
+		out = append(out, Descriptor{Channel: "zhipu", Label: m.zhipu.label, Kind: KindZhipu})
+	}
+	if m.xfyun != nil {
+		out = append(out, Descriptor{Channel: "xfyun", Label: m.xfyun.label, Kind: KindXFYun})
+	}
+	return out
+}
+
+func (m *Manager) ChannelBalance(ctx context.Context, channel string, force bool) (Balance, error) {
+	if m == nil {
+		return Balance{}, errChannelNotConfigured
+	}
+	switch channel {
+	case "deepseek":
+		if m.deepseek == nil {
+			return Balance{}, errChannelNotConfigured
+		}
+		if force {
+			return m.deepseek.Refresh(ctx), nil
+		}
+		return m.deepseek.Balance(ctx), nil
+	case "cpa":
+		if m.cpa == nil {
+			return Balance{}, errChannelNotConfigured
+		}
+		if force {
+			return m.cpa.Refresh(ctx), nil
+		}
+		return m.cpa.Snapshot(), nil
+	case "sub2api":
+		if m.sub2api == nil {
+			return Balance{}, errChannelNotConfigured
+		}
+		if force {
+			return m.sub2api.Refresh(ctx), nil
+		}
+		return m.sub2api.Balance(ctx), nil
+	case "opencode":
+		if m.opencode == nil {
+			return Balance{}, errChannelNotConfigured
+		}
+		return m.opencode.Balance(ctx), nil
+	case "zhipu":
+		if m.zhipu == nil {
+			return Balance{}, errChannelNotConfigured
+		}
+		if force {
+			return m.zhipu.Refresh(ctx), nil
+		}
+		return m.zhipu.Balance(ctx), nil
+	case "xfyun":
+		if m.xfyun == nil {
+			return Balance{}, errChannelNotConfigured
+		}
+		if force {
+			return m.xfyun.Refresh(ctx), nil
+		}
+		return m.xfyun.Balance(ctx), nil
+	default:
+		return Balance{}, errChannelNotConfigured
+	}
 }
 
 func (m *Manager) RefreshOpenCodeUsage(ctx context.Context, accountID string) (OpenCodeUsage, error) {

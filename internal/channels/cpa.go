@@ -33,7 +33,8 @@ type cpaProvider struct {
 	usageURL     string
 	client       *http.Client
 
-	wg sync.WaitGroup
+	wg        sync.WaitGroup
+	refreshMu sync.Mutex
 
 	mu        sync.RWMutex
 	cached    Balance
@@ -121,7 +122,14 @@ func (c *cpaProvider) Snapshot() Balance {
 	return c.cached
 }
 
+func (c *cpaProvider) Refresh(ctx context.Context) Balance {
+	c.refreshAndStore(ctx)
+	return c.Snapshot()
+}
+
 func (c *cpaProvider) refreshAndStore(ctx context.Context) {
+	c.refreshMu.Lock()
+	defer c.refreshMu.Unlock()
 	balance := c.refresh(ctx)
 	if !balance.OK {
 		slog.Warn("cpa refresh failed", "label", c.label, "error", balance.Error)

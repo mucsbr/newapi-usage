@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -63,6 +64,54 @@ func TestDeepSeekBalanceHTTPErrorFallsBack(t *testing.T) {
 	}
 	if balance.Error == "" {
 		t.Fatalf("expected an error message")
+	}
+}
+
+func TestDeepSeekRefreshBypassesCache(t *testing.T) {
+	var requests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		_, _ = io.WriteString(w, `{"is_available":true,"balance_infos":[{"currency":"CNY","total_balance":"10.00","granted_balance":"0.00","topped_up_balance":"10.00"}]}`)
+	}))
+	defer server.Close()
+
+	provider := newDeepSeek("DeepSeek", "sk-test", server.URL, 5*time.Second)
+	if !provider.Balance(context.Background()).OK || !provider.Balance(context.Background()).OK {
+		t.Fatal("cached balance should succeed")
+	}
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("cached requests = %d, want 1", got)
+	}
+	if !provider.Refresh(context.Background()).OK {
+		t.Fatal("forced refresh should succeed")
+	}
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("forced requests = %d, want 2", got)
+	}
+}
+
+func TestManagerDescriptorsDoNotFetchChannels(t *testing.T) {
+	var requests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		_, _ = io.WriteString(w, `{"is_available":true,"balance_infos":[]}`)
+	}))
+	defer server.Close()
+
+	manager := &Manager{deepseek: newDeepSeek("DeepSeek", "sk-test", server.URL, 5*time.Second)}
+	descriptors := manager.Descriptors()
+	if len(descriptors) != 1 || descriptors[0].Channel != "deepseek" || descriptors[0].Kind != KindCurrency {
+		t.Fatalf("unexpected descriptors: %+v", descriptors)
+	}
+	if got := requests.Load(); got != 0 {
+		t.Fatalf("descriptor lookup made %d upstream requests", got)
+	}
+	balance, err := manager.ChannelBalance(context.Background(), "deepseek", false)
+	if err != nil || !balance.OK {
+		t.Fatalf("single channel balance = %+v, err=%v", balance, err)
+	}
+	if _, err := manager.ChannelBalance(context.Background(), "missing", false); err == nil {
+		t.Fatal("unknown channel should fail")
 	}
 }
 
