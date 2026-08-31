@@ -2,6 +2,7 @@ package channels
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -34,14 +35,23 @@ func TestOpenCodeBalanceAndLiveRefresh(t *testing.T) {
 		}
 
 		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/dashboard/api/accounts":
-			_, _ = io.WriteString(w, fmt.Sprintf(`[{"id":%q,"name":"managed","username":"user","enabled":true,"account_type":"managed","setup_step":"ready","expires_on":"2026-09-10"}]`, accountID))
-		case r.Method == http.MethodGet && r.URL.Path == "/dashboard/api/pricing":
-			_, _ = io.WriteString(w, `{"limits":{"window_5h":12,"window_week":30,"window_month":60}}`)
-		case r.Method == http.MethodGet && r.URL.Path == "/dashboard/api/accounts/"+accountID+"/usage":
-			_, _ = io.WriteString(w, fmt.Sprintf(`{"account_id":%q,"window_5h":3,"window_week":12,"window_month":15,"resets_in_5h":"2026-08-12T17:00:00Z","resets_in_week":"2026-08-16T23:00:00Z","resets_in_month":"2026-09-10T00:00:00Z"}`, accountID))
-		case r.Method == http.MethodPost && r.URL.Path == "/dashboard/api/accounts/"+accountID+"/usage/refresh":
-			_, _ = io.WriteString(w, fmt.Sprintf(`{"usage":{"account_id":%q,"window_5h":4,"window_week":13,"window_month":16,"resets_in_5h":"2026-08-12T18:00:00Z","resets_in_week":"2026-08-16T23:00:00Z","resets_in_month":"2026-09-10T00:00:00Z"},"source":"browser_profile_console"}`, accountID))
+		case r.Method == http.MethodGet && r.URL.Path == "/dashboard/api/v3/accounts":
+			_, _ = io.WriteString(w, fmt.Sprintf(`{"revision":7,"processGeneration":99,"accounts":[{"id":%q,"name":"managed","username":"user","enabled":true,"accountType":"managed","setupStep":"ready","expiresOn":"2026-09-10","providerId":"opencode","offeringId":"go"},{"id":"zen-free","name":"Zen Free","enabled":true,"accountType":"key","setupStep":"ready","expiresOn":"2026-09-10","providerId":"opencode-zen-free","offeringId":"anonymous-free"}]}`, accountID))
+		case r.Method == http.MethodGet && r.URL.Path == "/dashboard/api/v3/providers/opencode/go/pricing":
+			_, _ = io.WriteString(w, `{"availability":"available","providerId":"opencode","offeringId":"go","revision":7,"processGeneration":99,"pricingRevision":"pricing-1","providerPricingRevision":"pricing-1","providerSnapshot":null,"snapshot":{"limits":{"window5h":12,"windowWeek":30,"windowMonth":60}}}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/dashboard/api/v3/accounts/"+accountID+"/usage":
+			_, _ = io.WriteString(w, fmt.Sprintf(`{"accountId":%q,"window5h":3,"windowWeek":12,"windowMonth":15,"resetsIn5h":"2026-09-01T17:00:00Z","resetsInWeek":"2026-09-07T23:00:00Z","resetsInMonth":"2026-09-10T00:00:00Z","revision":7,"processGeneration":99,"pricingRevision":"pricing-1"}`, accountID))
+		case r.Method == http.MethodPost && r.URL.Path == "/dashboard/api/v3/accounts/"+accountID+"/usage/refresh":
+			var request openCodeRefreshRequest
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				http.Error(w, "invalid json", http.StatusBadRequest)
+				return
+			}
+			if request.ExpectedRevision != 7 || request.ProcessGeneration != 99 {
+				http.Error(w, "invalid cas", http.StatusConflict)
+				return
+			}
+			_, _ = io.WriteString(w, fmt.Sprintf(`{"usage":{"accountId":%q,"window5h":4,"windowWeek":13,"windowMonth":16,"resetsIn5h":"2026-09-01T18:00:00Z","resetsInWeek":"2026-09-07T23:00:00Z","resetsInMonth":"2026-09-10T00:00:00Z"},"source":"official_go_usage","lastSuccessAt":"2026-08-31T07:00:00Z","nextAllowedAt":"2026-08-31T07:00:15Z","revision":7,"processGeneration":99}`, accountID))
 		default:
 			http.NotFound(w, r)
 		}
@@ -82,7 +92,7 @@ func TestOpenCodeBalanceAndLiveRefresh(t *testing.T) {
 	if err != nil {
 		t.Fatalf("refresh usage: %v", err)
 	}
-	if live.Source != "browser_profile_console" {
+	if live.Source != "official_go_usage" {
 		t.Fatalf("source = %q", live.Source)
 	}
 	if len(live.Windows) != 3 || live.Windows[0].Source != "live" || live.Windows[0].RemainingUSD != 8 {

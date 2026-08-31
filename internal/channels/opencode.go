@@ -37,37 +37,58 @@ type openCodeAccountRaw struct {
 	Name         string `json:"name"`
 	Username     string `json:"username"`
 	Enabled      bool   `json:"enabled"`
-	AccountType  string `json:"account_type"`
-	SetupStep    string `json:"setup_step"`
-	PurchaseDate string `json:"purchase_date"`
-	ExpiresOn    string `json:"expires_on"`
-	LastError    string `json:"last_error"`
-	AuthError    string `json:"auth_error"`
+	AccountType  string `json:"accountType"`
+	SetupStep    string `json:"setupStep"`
+	PurchaseDate string `json:"purchaseDate"`
+	ExpiresOn    string `json:"expiresOn"`
+	LastError    string `json:"lastError"`
+	AuthError    string `json:"authError"`
+	ProviderID   string `json:"providerId"`
+	OfferingID   string `json:"offeringId"`
+}
+
+type openCodeAccountListRaw struct {
+	Accounts          []openCodeAccountRaw `json:"accounts"`
+	Revision          uint64               `json:"revision"`
+	ProcessGeneration uint64               `json:"processGeneration"`
 }
 
 type openCodeLimits struct {
-	FiveHour float64 `json:"window_5h"`
-	Week     float64 `json:"window_week"`
-	Month    float64 `json:"window_month"`
+	FiveHour float64 `json:"window5h"`
+	Week     float64 `json:"windowWeek"`
+	Month    float64 `json:"windowMonth"`
 }
 
 type openCodePricingRaw struct {
-	Limits openCodeLimits `json:"limits"`
+	Snapshot *struct {
+		Limits openCodeLimits `json:"limits"`
+	} `json:"snapshot"`
 }
 
 type openCodeUsageRaw struct {
-	AccountID  string  `json:"account_id"`
-	FiveHour   float64 `json:"window_5h"`
-	Week       float64 `json:"window_week"`
-	Month      float64 `json:"window_month"`
-	Reset5H    *string `json:"resets_in_5h"`
-	ResetWeek  *string `json:"resets_in_week"`
-	ResetMonth *string `json:"resets_in_month"`
+	AccountID         string  `json:"accountId"`
+	FiveHour          float64 `json:"window5h"`
+	Week              float64 `json:"windowWeek"`
+	Month             float64 `json:"windowMonth"`
+	Reset5H           *string `json:"resetsIn5h"`
+	ResetWeek         *string `json:"resetsInWeek"`
+	ResetMonth        *string `json:"resetsInMonth"`
+	Revision          uint64  `json:"revision"`
+	ProcessGeneration uint64  `json:"processGeneration"`
 }
 
 type openCodeRefreshRaw struct {
-	Usage  openCodeUsageRaw `json:"usage"`
-	Source string           `json:"source"`
+	Usage             openCodeUsageRaw `json:"usage"`
+	Source            string           `json:"source"`
+	LastSuccessAt     string           `json:"lastSuccessAt"`
+	NextAllowedAt     string           `json:"nextAllowedAt"`
+	Revision          uint64           `json:"revision"`
+	ProcessGeneration uint64           `json:"processGeneration"`
+}
+
+type openCodeRefreshRequest struct {
+	ExpectedRevision  uint64 `json:"expectedRevision"`
+	ProcessGeneration uint64 `json:"processGeneration"`
 }
 
 func newOpenCode(cfg openCodeConfig) *openCodeProvider {
@@ -142,8 +163,19 @@ func (o *openCodeProvider) RefreshUsage(ctx context.Context, accountID string) (
 	if err != nil {
 		return OpenCodeUsage{}, err
 	}
-	endpoint := o.apiURL("/accounts/" + url.PathEscape(accountID) + "/usage/refresh")
-	body, err := o.doJSON(ctx, client, http.MethodPost, endpoint, nil)
+	current, err := o.fetchUsage(ctx, client, accountID)
+	if err != nil {
+		return OpenCodeUsage{}, err
+	}
+	payload, err := json.Marshal(openCodeRefreshRequest{
+		ExpectedRevision:  current.Revision,
+		ProcessGeneration: current.ProcessGeneration,
+	})
+	if err != nil {
+		return OpenCodeUsage{}, err
+	}
+	endpoint := o.v3URL("/accounts/" + url.PathEscape(accountID) + "/usage/refresh")
+	body, err := o.doJSON(ctx, client, http.MethodPost, endpoint, payload)
 	if err != nil {
 		return OpenCodeUsage{}, err
 	}
@@ -199,26 +231,32 @@ func (o *openCodeProvider) authenticatedClient(ctx context.Context) (*http.Clien
 	if err != nil {
 		return nil, err
 	}
-	if _, err := o.doJSON(ctx, client, http.MethodPost, o.apiURL("/auth/login"), payload); err != nil {
+	if _, err := o.doJSON(ctx, client, http.MethodPost, o.authURL("/login"), payload); err != nil {
 		return nil, fmt.Errorf("login: %w", err)
 	}
 	return client, nil
 }
 
 func (o *openCodeProvider) fetchAccounts(ctx context.Context, client *http.Client) ([]openCodeAccountRaw, error) {
-	body, err := o.doJSON(ctx, client, http.MethodGet, o.apiURL("/accounts"), nil)
+	body, err := o.doJSON(ctx, client, http.MethodGet, o.v3URL("/accounts"), nil)
 	if err != nil {
 		return nil, fmt.Errorf("accounts: %w", err)
 	}
-	var accounts []openCodeAccountRaw
-	if err := json.Unmarshal(body, &accounts); err != nil {
+	var response openCodeAccountListRaw
+	if err := json.Unmarshal(body, &response); err != nil {
 		return nil, fmt.Errorf("decode accounts: %w", err)
+	}
+	accounts := make([]openCodeAccountRaw, 0, len(response.Accounts))
+	for _, account := range response.Accounts {
+		if account.ProviderID == "opencode" && account.OfferingID == "go" {
+			accounts = append(accounts, account)
+		}
 	}
 	return accounts, nil
 }
 
 func (o *openCodeProvider) fetchLimits(ctx context.Context, client *http.Client) (openCodeLimits, error) {
-	body, err := o.doJSON(ctx, client, http.MethodGet, o.apiURL("/pricing"), nil)
+	body, err := o.doJSON(ctx, client, http.MethodGet, o.v3URL("/providers/opencode/go/pricing"), nil)
 	if err != nil {
 		return openCodeLimits{}, fmt.Errorf("pricing: %w", err)
 	}
@@ -226,11 +264,14 @@ func (o *openCodeProvider) fetchLimits(ctx context.Context, client *http.Client)
 	if err := json.Unmarshal(body, &pricing); err != nil {
 		return openCodeLimits{}, fmt.Errorf("decode pricing: %w", err)
 	}
-	return pricing.Limits, nil
+	if pricing.Snapshot == nil {
+		return openCodeLimits{}, fmt.Errorf("opencode go pricing is not available")
+	}
+	return pricing.Snapshot.Limits, nil
 }
 
 func (o *openCodeProvider) fetchUsage(ctx context.Context, client *http.Client, accountID string) (openCodeUsageRaw, error) {
-	endpoint := o.apiURL("/accounts/" + url.PathEscape(accountID) + "/usage")
+	endpoint := o.v3URL("/accounts/" + url.PathEscape(accountID) + "/usage")
 	body, err := o.doJSON(ctx, client, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return openCodeUsageRaw{}, fmt.Errorf("usage: %w", err)
@@ -270,8 +311,12 @@ func (o *openCodeProvider) doJSON(ctx context.Context, client *http.Client, meth
 	return raw, nil
 }
 
-func (o *openCodeProvider) apiURL(path string) string {
-	return o.baseURL + "/dashboard/api" + path
+func (o *openCodeProvider) authURL(path string) string {
+	return o.baseURL + "/dashboard/api/auth" + path
+}
+
+func (o *openCodeProvider) v3URL(path string) string {
+	return o.baseURL + "/dashboard/api/v3" + path
 }
 
 func openCodeUsageWindows(usage openCodeUsageRaw, limits openCodeLimits, source string) []OpenCodeUsageWindow {

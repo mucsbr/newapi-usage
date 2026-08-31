@@ -173,7 +173,7 @@ OPENCODE_PASSWORD=your-dashboard-password
 OPENCODE_LABEL=OpenCode
 ```
 
-The card loads the account list and pricing limits, then shows each account's estimated 5-hour, weekly, and monthly remaining USD quota. Enabled managed accounts have a refresh button that replaces the estimated values with live usage from `/dashboard/api/accounts/{id}/usage/refresh`.
+The card uses Dashboard V3: accounts come from `/dashboard/api/v3/accounts`, Go limits from `/dashboard/api/v3/providers/opencode/go/pricing`, and estimates from `/dashboard/api/v3/accounts/{id}/usage`. Enabled managed accounts have a refresh button that sends the required `expectedRevision` and `processGeneration` fields to `/dashboard/api/v3/accounts/{id}/usage/refresh` and replaces estimates with live usage.
 
 Zhipu GLM Coding Plan quota card:
 
