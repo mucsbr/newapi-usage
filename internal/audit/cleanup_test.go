@@ -19,13 +19,12 @@ func TestCleanupEstimateAndJobDeleteOnlySelectedRange(t *testing.T) {
 	defer idx.Close()
 
 	ctx := context.Background()
-	if err := idx.prepareCleanupIndexes(ctx); err != nil {
-		t.Fatalf("prepare cleanup indexes: %v", err)
-	}
-	idx.setCleanupIndexStatus(true, nil)
 	insertCleanupTestEntry(t, idx.db, 1, 1000, "request-1", "old request body")
 	insertCleanupTestEntry(t, idx.db, 2, 2000, "request-2", "middle request body")
 	insertCleanupTestEntry(t, idx.db, 3, 3000, "request-3", "new request body")
+	if err := idx.backfillCleanupCatalog(ctx); err != nil {
+		t.Fatalf("backfill cleanup catalog: %v", err)
+	}
 	if _, err := idx.db.Exec(`INSERT INTO log_audit_matches (log_id, audit_entry_id, matched_by, matched_note, matched_at) VALUES (101, 1, 'token_time', '', 1000)`); err != nil {
 		t.Fatalf("insert match: %v", err)
 	}
@@ -66,6 +65,7 @@ func TestCleanupEstimateAndJobDeleteOnlySelectedRange(t *testing.T) {
 	}
 
 	assertCleanupTableCount(t, idx.db, "audit_entries", 2)
+	assertCleanupTableCount(t, idx.db, "audit_cleanup_entries", 2)
 	assertCleanupTableCount(t, idx.db, "audit_security_alerts", 0)
 	assertCleanupTableCount(t, idx.db, "log_audit_matches", 0)
 	var remaining int64
@@ -89,11 +89,10 @@ func TestCancelQueuedCleanupJobKeepsAuditEntries(t *testing.T) {
 	defer idx.Close()
 
 	ctx := context.Background()
-	if err := idx.prepareCleanupIndexes(ctx); err != nil {
-		t.Fatalf("prepare cleanup indexes: %v", err)
-	}
-	idx.setCleanupIndexStatus(true, nil)
 	insertCleanupTestEntry(t, idx.db, 1, 1000, "request-1", "request body")
+	if err := idx.backfillCleanupCatalog(ctx); err != nil {
+		t.Fatalf("backfill cleanup catalog: %v", err)
+	}
 
 	job, err := idx.CreateCleanupJob(ctx, 900, 1100)
 	if err != nil {

@@ -31,11 +31,13 @@ type Indexer struct {
 	wg          sync.WaitGroup
 	cleanupWake chan struct{}
 
-	statusMu          sync.Mutex
-	lastScanAt        int64
-	lastScanError     string
-	cleanupIndexReady bool
-	cleanupIndexError string
+	statusMu             sync.Mutex
+	lastScanAt           int64
+	lastScanError        string
+	cleanupCatalogReady  bool
+	cleanupCatalogError  string
+	cleanupCatalogCursor int64
+	cleanupCatalogMaxID  int64
 }
 
 type fileState struct {
@@ -130,7 +132,7 @@ func Open(cfg Config, resolver TokenResolver) (*Indexer, error) {
 		db.Close()
 		return nil, err
 	}
-	idx.cleanupIndexReady, idx.cleanupIndexError = idx.cleanupIndexesState(context.Background())
+	idx.loadCleanupCatalogStatus(context.Background())
 	return idx, nil
 }
 
@@ -155,7 +157,7 @@ func (i *Indexer) Start(ctx context.Context) {
 	i.wg.Add(1)
 	go func() {
 		defer i.wg.Done()
-		i.runCleanupIndexPreparation(ctx)
+		i.runCleanupCatalogBackfill(ctx)
 	}()
 	i.wg.Add(1)
 	go func() {
@@ -531,6 +533,10 @@ func (i *Indexer) initSchema(ctx context.Context) error {
 			completed_at INTEGER NOT NULL DEFAULT 0,
 			updated_at INTEGER NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS audit_cleanup_entries (
+			audit_entry_id INTEGER PRIMARY KEY,
+			created_at INTEGER NOT NULL
+		)`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_entries_token_time ON audit_entries(token_id, created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_entries_request_id ON audit_entries(request_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_entries_model ON audit_entries(model)`,
@@ -538,6 +544,7 @@ func (i *Indexer) initSchema(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_audit_security_alerts_token_time ON audit_security_alerts(token_id, request_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_log_audit_matches_entry ON log_audit_matches(audit_entry_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_cleanup_jobs_status ON audit_cleanup_jobs(status, id)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_cleanup_entries_time ON audit_cleanup_entries(created_at, audit_entry_id)`,
 	}
 	for _, statement := range statements {
 		if _, err := i.db.ExecContext(ctx, statement); err != nil {
@@ -878,7 +885,17 @@ func (i *Indexer) insertEntry(ctx context.Context, tx *sql.Tx, sourceID string, 
 		return false, err
 	}
 	rows, err := result.RowsAffected()
-	return rows > 0, err
+	if err != nil || rows == 0 {
+		return false, err
+	}
+	entryID, err := result.LastInsertId()
+	if err != nil {
+		return false, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO audit_cleanup_entries (audit_entry_id, created_at) VALUES (?, ?)`, entryID, record.CreatedAt); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (i *Indexer) resolveRecordToken(record parsedRecord, resolveCache map[string]ResolvedToken) (int64, string, string) {

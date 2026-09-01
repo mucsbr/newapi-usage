@@ -39,6 +39,7 @@ func TestIndexerIncrementalImport(t *testing.T) {
 		t.Fatalf("first scan: %v", err)
 	}
 	assertIndexedRows(t, idx, 1)
+	assertCleanupTableCount(t, idx.db, "audit_cleanup_entries", 1)
 
 	items, err := idx.Lookup(context.Background(), LookupFilter{TokenID: 7, Model: "gpt-4o", CreatedAt: 1000, LogID: 123})
 	if err != nil {

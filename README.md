@@ -132,7 +132,7 @@ Records with `record_type: "security_alert"` are stored separately from request 
 
 Administrators can open `/security.html` to view all security alerts in one paginated list, filter by time, key, model, or keyword, and open the associated original request.
 
-Administrators can open `/cleanup.html` to estimate and delete audit data by time range. The default range starts at the oldest indexed request and ends 30 days before the current time. The estimate includes request rows, security alerts, NewAPI log match caches, related review rows, and approximate stored bytes. Cleanup runs in small persisted batches, can be canceled, and resumes after a service restart.
+Administrators can open `/cleanup.html` to estimate and delete audit data by time range. The default range starts at the oldest indexed request and ends 30 days before the current time. The estimate includes request rows, security alerts, NewAPI log match caches, related review rows, and approximate stored bytes. Cleanup runs in small persisted batches, can be canceled, and resumes after a service restart. Existing databases are prepared through a resumable lightweight `audit_entry_id + created_at` catalog backfill, avoiding a blocking index build over large request bodies.
 
 Cleanup only removes data from the audit SQLite database; OpenResty JSONL files remain governed by their existing logrotate policy. Deleted SQLite pages become reusable by future audit imports, so normal cleanup stops database growth but does not immediately reduce the `audit.db` file size reported by the filesystem. Physically shrinking the file requires a separate low-traffic database rebuild with enough temporary disk space.
 

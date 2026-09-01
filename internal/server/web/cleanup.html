@@ -218,10 +218,11 @@
         el("reusableSize").textContent = bytesText(data.reusable_bytes);
         el("totalEntries").textContent = data.index_ready ? fmt.format(data.total_entries || 0) : "准备中";
         el("dataRange").textContent = data.index_ready && data.oldest_at ? `${new Date(data.oldest_at * 1000).toLocaleDateString("zh-CN")} - ${new Date(data.newest_at * 1000).toLocaleDateString("zh-CN")}` : "-";
-        el("indexStatus").textContent = data.index_ready ? "索引已就绪" : data.index_error ? "索引重试中" : "索引准备中";
+        const progress = Math.max(0, Math.min(100, Number(data.index_progress || 0) * 100));
+        el("indexStatus").textContent = data.index_ready ? "目录已就绪" : data.index_error ? "目录重试中" : `目录准备中 ${progress.toFixed(progress >= 10 ? 1 : 2)}%`;
         el("indexStatus").className = `pill ${data.index_ready ? "good" : data.index_error ? "bad" : "warn"}`;
         el("estimate").disabled = !data.index_ready;
-        el("rangeMeta").textContent = data.index_ready ? `最老请求 ${tsText(data.oldest_at)}，默认保留最近 30 天` : "首次启用正在后台建立时间索引，服务可继续访问";
+        el("rangeMeta").textContent = data.index_ready ? `最老请求 ${tsText(data.oldest_at)}，默认保留最近 30 天` : `正在分批建立轻量清理目录 ${fmt.format(data.index_cursor || 0)} / ${fmt.format(data.index_max_id || 0)}，审计同步可继续运行`;
         if (data.index_ready && (setDefaults || !state.defaultsSet)) { el("start").value = unixToInput(data.default_start); el("end").value = unixToInput(data.default_end); state.defaultsSet = true; invalidateEstimate(); }
         renderJobs(data.latest_cleanup_jobs || []);
         el("pageStatus").textContent = data.index_ready ? "已连接" : "准备中";

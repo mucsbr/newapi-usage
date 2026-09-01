@@ -6,10 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
-
-	_ "modernc.org/sqlite"
 )
 
 const (
@@ -22,6 +19,10 @@ const (
 	cleanupEntryBatchSize = 200
 	cleanupAlertBatchSize = 500
 	cleanupBatchPause     = 100 * time.Millisecond
+
+	cleanupCatalogMaintenanceName = "cleanup_entry_catalog_v1"
+	cleanupCatalogBatchSize       = 5000
+	cleanupCatalogPause           = 100 * time.Millisecond
 )
 
 var (
@@ -34,6 +35,9 @@ type CleanupOverview struct {
 	Enabled           bool         `json:"enabled"`
 	IndexReady        bool         `json:"index_ready"`
 	IndexError        string       `json:"index_error,omitempty"`
+	IndexCursor       int64        `json:"index_cursor"`
+	IndexMaxID        int64        `json:"index_max_id"`
+	IndexProgress     float64      `json:"index_progress"`
 	OldestAt          int64        `json:"oldest_at"`
 	NewestAt          int64        `json:"newest_at"`
 	TotalEntries      int64        `json:"total_entries"`
@@ -85,7 +89,7 @@ func (i *Indexer) CleanupOverview(ctx context.Context) (CleanupOverview, error) 
 	if i == nil {
 		return CleanupOverview{Enabled: false}, nil
 	}
-	ready, indexErr := i.cleanupIndexStatus()
+	ready, indexErr, cursor, maxID := i.cleanupCatalogStatus()
 	databaseBytes, reusableBytes, err := i.databaseSpace(ctx)
 	if err != nil {
 		return CleanupOverview{}, err
@@ -94,9 +98,17 @@ func (i *Indexer) CleanupOverview(ctx context.Context) (CleanupOverview, error) 
 		Enabled:       i.Enabled(),
 		IndexReady:    ready,
 		IndexError:    indexErr,
+		IndexCursor:   cursor,
+		IndexMaxID:    maxID,
 		DefaultEnd:    time.Now().AddDate(0, 0, -30).Unix(),
 		DatabaseBytes: databaseBytes,
 		ReusableBytes: reusableBytes,
+	}
+	if maxID > 0 {
+		out.IndexProgress = float64(cursor) / float64(maxID)
+		if out.IndexProgress > 1 {
+			out.IndexProgress = 1
+		}
 	}
 	jobs, err := i.ListCleanupJobs(ctx, 10)
 	if err != nil {
@@ -107,7 +119,7 @@ func (i *Indexer) CleanupOverview(ctx context.Context) (CleanupOverview, error) 
 		return out, nil
 	}
 	if err := i.db.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(MIN(created_at), 0), COALESCE(MAX(created_at), 0)
-		FROM audit_entries INDEXED BY idx_audit_entries_created_at`).Scan(
+		FROM audit_cleanup_entries`).Scan(
 		&out.TotalEntries, &out.OldestAt, &out.NewestAt,
 	); err != nil {
 		return CleanupOverview{}, err
@@ -120,7 +132,7 @@ func (i *Indexer) EstimateCleanup(ctx context.Context, startAt, endAt int64) (Cl
 	if err := validateCleanupRange(startAt, endAt); err != nil {
 		return CleanupEstimate{}, err
 	}
-	ready, _ := i.cleanupIndexStatus()
+	ready, _, _, _ := i.cleanupCatalogStatus()
 	if !ready {
 		return CleanupEstimate{}, ErrCleanupPreparing
 	}
@@ -128,7 +140,7 @@ func (i *Indexer) EstimateCleanup(ctx context.Context, startAt, endAt int64) (Cl
 	out := CleanupEstimate{StartAt: startAt, EndAt: endAt}
 	if err := i.db.QueryRowContext(ctx, `SELECT COUNT(*),
 		COALESCE(MIN(created_at), 0), COALESCE(MAX(created_at), 0)
-		FROM audit_entries INDEXED BY idx_audit_entries_created_at
+		FROM audit_cleanup_entries
 		WHERE created_at >= ? AND created_at <= ?`, startAt, endAt).Scan(
 		&out.EntryCount, &out.FirstMatchedAt, &out.LastMatchedAt,
 	); err != nil {
@@ -136,12 +148,15 @@ func (i *Indexer) EstimateCleanup(ctx context.Context, startAt, endAt int64) (Cl
 	}
 	var sampleCount, sampleBytes int64
 	if out.EntryCount > 0 {
-		if err := i.db.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(stored_bytes), 0) FROM (
-			SELECT COALESCE(length(body_gzip), 0) + COALESCE(length(CAST(body AS BLOB)), 0) + 384 AS stored_bytes
-			FROM audit_entries INDEXED BY idx_audit_entries_created_at
+		if err := i.db.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(
+			COALESCE(length(e.body_gzip), 0) + COALESCE(length(CAST(e.body AS BLOB)), 0) + 384
+		), 0)
+		FROM audit_entries e
+		JOIN (
+			SELECT audit_entry_id FROM audit_cleanup_entries
 			WHERE created_at >= ? AND created_at <= ?
-			ORDER BY created_at, id LIMIT 1000
-		)`, startAt, endAt).Scan(&sampleCount, &sampleBytes); err != nil {
+			ORDER BY created_at, audit_entry_id LIMIT 500
+		) sample ON sample.audit_entry_id = e.id`, startAt, endAt).Scan(&sampleCount, &sampleBytes); err != nil {
 			return CleanupEstimate{}, err
 		}
 	}
@@ -157,16 +172,12 @@ func (i *Indexer) EstimateCleanup(ctx context.Context, startAt, endAt int64) (Cl
 		COALESCE(length(CAST(request_id AS BLOB)), 0) + COALESCE(length(CAST(model AS BLOB)), 0) +
 		COALESCE(length(CAST(key_hash AS BLOB)), 0) + COALESCE(length(CAST(matched_text AS BLOB)), 0) + 256
 	), 0) FROM audit_security_alerts a
-	WHERE (a.request_at >= ? AND a.request_at <= ?)
-		OR (a.request_id <> '' AND EXISTS (
-			SELECT 1 FROM audit_entries e INDEXED BY idx_audit_entries_request_id
-			WHERE e.request_id = a.request_id AND e.created_at >= ? AND e.created_at <= ?
-		))`, startAt, endAt, startAt, endAt).Scan(&out.AlertCount, &alertBytes); err != nil {
+	WHERE a.request_at >= ? AND a.request_at <= ?`, startAt, endAt).Scan(&out.AlertCount, &alertBytes); err != nil {
 		return CleanupEstimate{}, err
 	}
 
-	if err := i.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_entries e INDEXED BY idx_audit_entries_created_at
-		JOIN log_audit_matches m ON m.audit_entry_id = e.id
+	if err := i.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_cleanup_entries e
+		JOIN log_audit_matches m ON m.audit_entry_id = e.audit_entry_id
 		WHERE e.created_at >= ? AND e.created_at <= ?`, startAt, endAt).Scan(&out.MatchCount); err != nil {
 		return CleanupEstimate{}, err
 	}
@@ -178,8 +189,8 @@ func (i *Indexer) EstimateCleanup(ctx context.Context, startAt, endAt int64) (Cl
 		if err := i.db.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(
 			COALESCE(length(CAST(r.content_hash AS BLOB)), 0) + COALESCE(length(CAST(r.error AS BLOB)), 0) + 256
 		), 0)
-		FROM audit_entries e INDEXED BY idx_audit_entries_created_at
-		JOIN review_job_entries r ON r.audit_entry_id = e.id
+		FROM audit_cleanup_entries e
+		JOIN review_job_entries r ON r.audit_entry_id = e.audit_entry_id
 		WHERE e.created_at >= ? AND e.created_at <= ?`, startAt, endAt).Scan(&out.ReviewEntryCount, &reviewBytes); err != nil {
 			return CleanupEstimate{}, err
 		}
@@ -298,25 +309,24 @@ func (i *Indexer) CancelCleanupJob(ctx context.Context, id int64) (CleanupJob, e
 	return i.CleanupJob(ctx, id)
 }
 
-func (i *Indexer) runCleanupIndexPreparation(ctx context.Context) {
+func (i *Indexer) runCleanupCatalogBackfill(ctx context.Context) {
 	for {
-		ready, _ := i.cleanupIndexStatus()
+		ready, _, _, _ := i.cleanupCatalogStatus()
 		if ready {
 			i.notifyCleanupWorker()
 			return
 		}
-		slog.Info("audit cleanup index preparation started")
-		err := i.prepareCleanupIndexes(ctx)
-		i.setCleanupIndexStatus(err == nil, err)
+		err := i.backfillCleanupCatalog(ctx)
 		if err == nil {
-			slog.Info("audit cleanup index preparation completed")
 			i.notifyCleanupWorker()
 			return
 		}
 		if ctx.Err() != nil {
 			return
 		}
-		slog.Warn("audit cleanup index preparation failed", "error", err)
+		_, _, cursor, maxID := i.cleanupCatalogStatus()
+		i.setCleanupCatalogStatus(false, err, cursor, maxID)
+		slog.Warn("audit cleanup catalog backfill failed", "error", err)
 		timer := time.NewTimer(30 * time.Second)
 		select {
 		case <-ctx.Done():
@@ -327,44 +337,84 @@ func (i *Indexer) runCleanupIndexPreparation(ctx context.Context) {
 	}
 }
 
-func (i *Indexer) prepareCleanupIndexes(ctx context.Context) error {
-	db, err := sql.Open("sqlite", i.cfg.IndexDSN)
+func (i *Indexer) backfillCleanupCatalog(ctx context.Context) error {
+	cursor, completedAt, err := i.cleanupCatalogMaintenanceState(ctx)
 	if err != nil {
 		return err
 	}
-	defer db.Close()
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
-	if _, err := db.ExecContext(ctx, `PRAGMA busy_timeout=60000`); err != nil {
+	var maxID int64
+	if err := i.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(id), 0) FROM audit_entries`).Scan(&maxID); err != nil {
 		return err
 	}
-	statements := []string{
-		`CREATE INDEX IF NOT EXISTS idx_audit_entries_created_at ON audit_entries(created_at, id)`,
-		`CREATE INDEX IF NOT EXISTS idx_audit_security_alerts_request_at ON audit_security_alerts(request_at, id)`,
-		`CREATE INDEX IF NOT EXISTS idx_review_job_entries_audit_entry ON review_job_entries(audit_entry_id)`,
+	if completedAt > 0 {
+		i.setCleanupCatalogStatus(true, nil, maxID, maxID)
+		return nil
 	}
-	for _, statement := range statements {
-		if strings.Contains(statement, "review_job_entries") {
-			exists, err := tableExistsDB(ctx, db, "review_job_entries")
-			if err != nil {
+
+	i.setCleanupCatalogStatus(false, nil, cursor, maxID)
+	slog.Info("audit cleanup catalog backfill started", "cursor", cursor, "max_id", maxID, "batch_size", cleanupCatalogBatchSize)
+	lastLogAt := time.Now()
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		var boundary int64
+		var count int64
+		if err := i.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(id), 0), COUNT(*) FROM (
+			SELECT id FROM audit_entries WHERE id > ? ORDER BY id LIMIT ?
+		)`, cursor, cleanupCatalogBatchSize).Scan(&boundary, &count); err != nil {
+			return err
+		}
+		if count == 0 {
+			now := time.Now().Unix()
+			if err := i.saveCleanupCatalogState(ctx, cursor, now); err != nil {
 				return err
 			}
-			if !exists {
-				continue
+			if err := i.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(id), 0) FROM audit_entries`).Scan(&maxID); err != nil {
+				return err
 			}
+			i.setCleanupCatalogStatus(true, nil, maxID, maxID)
+			slog.Info("audit cleanup catalog backfill completed", "cursor", cursor, "max_id", maxID)
+			return nil
 		}
-		if _, err := db.ExecContext(ctx, statement); err != nil {
+
+		tx, err := i.db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO audit_cleanup_entries (audit_entry_id, created_at)
+			SELECT id, created_at FROM audit_entries WHERE id > ? AND id <= ?`, cursor, boundary); err != nil {
+			tx.Rollback()
+			return err
+		}
+		now := time.Now().Unix()
+		if _, err := tx.ExecContext(ctx, `INSERT INTO audit_maintenance (name, cursor, completed_at, updated_at)
+			VALUES (?, ?, 0, ?)
+			ON CONFLICT(name) DO UPDATE SET cursor = excluded.cursor, completed_at = 0, updated_at = excluded.updated_at`,
+			cleanupCatalogMaintenanceName, boundary, now); err != nil {
+			tx.Rollback()
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		cursor = boundary
+		i.setCleanupCatalogStatus(false, nil, cursor, maxID)
+		if time.Since(lastLogAt) >= 10*time.Second {
+			slog.Info("audit cleanup catalog backfill progress", "cursor", cursor, "max_id", maxID)
+			lastLogAt = time.Now()
+		}
+		if err := waitWithContext(ctx, cleanupCatalogPause); err != nil {
 			return err
 		}
 	}
-	return nil
 }
 
 func (i *Indexer) runCleanupJobs(ctx context.Context) {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	for {
-		if ready, _ := i.cleanupIndexStatus(); ready {
+		if ready, _, _, _ := i.cleanupCatalogStatus(); ready {
 			if err := i.runNextCleanupJob(ctx); err != nil && !errors.Is(err, context.Canceled) {
 				slog.Warn("audit cleanup job processing failed", "error", err)
 			}
@@ -498,11 +548,12 @@ func (i *Indexer) cleanupEntryBatch(ctx context.Context, job CleanupJob, reviewT
 		return 0, err
 	}
 	defer tx.Rollback()
-	rows, err := tx.QueryContext(ctx, `SELECT id, request_id,
-		COALESCE(length(body_gzip), 0) + COALESCE(length(CAST(body AS BLOB)), 0) + 384
-		FROM audit_entries INDEXED BY idx_audit_entries_created_at
-		WHERE created_at >= ? AND created_at <= ?
-		ORDER BY created_at, id LIMIT ?`, job.StartAt, job.EndAt, cleanupEntryBatchSize)
+	rows, err := tx.QueryContext(ctx, `SELECT e.id, e.request_id,
+		COALESCE(length(e.body_gzip), 0) + COALESCE(length(CAST(e.body AS BLOB)), 0) + 384
+		FROM audit_cleanup_entries c
+		JOIN audit_entries e ON e.id = c.audit_entry_id
+		WHERE c.created_at >= ? AND c.created_at <= ?
+		ORDER BY c.created_at, c.audit_entry_id LIMIT ?`, job.StartAt, job.EndAt, cleanupEntryBatchSize)
 	if err != nil {
 		return 0, err
 	}
@@ -572,6 +623,9 @@ func (i *Indexer) cleanupEntryBatch(ctx context.Context, job CleanupJob, reviewT
 	if _, err := tx.ExecContext(ctx, `DELETE FROM audit_entries WHERE id IN (`+placeholders(len(ids))+`)`, ids...); err != nil {
 		return 0, err
 	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM audit_cleanup_entries WHERE audit_entry_id IN (`+placeholders(len(ids))+`)`, ids...); err != nil {
+		return 0, err
+	}
 	now := time.Now().Unix()
 	if _, err := tx.ExecContext(ctx, `UPDATE audit_cleanup_jobs SET
 		deleted_entries = deleted_entries + ?, deleted_alerts = deleted_alerts + ?,
@@ -594,7 +648,7 @@ func (i *Indexer) cleanupAlertBatch(ctx context.Context, job CleanupJob) (int, e
 	defer tx.Rollback()
 	rows, err := tx.QueryContext(ctx, `SELECT id,
 		COALESCE(length(CAST(response_body AS BLOB)), 0) + COALESCE(length(CAST(matched_text AS BLOB)), 0) + 256
-		FROM audit_security_alerts INDEXED BY idx_audit_security_alerts_request_at
+		FROM audit_security_alerts
 		WHERE request_at >= ? AND request_at <= ? ORDER BY request_at, id LIMIT ?`, job.StartAt, job.EndAt, cleanupAlertBatchSize)
 	if err != nil {
 		return 0, err
@@ -682,38 +736,77 @@ func (i *Indexer) failCleanupJob(ctx context.Context, id int64, cause error) err
 	return err
 }
 
-func (i *Indexer) cleanupIndexesState(ctx context.Context) (bool, string) {
-	required := []string{"idx_audit_entries_created_at", "idx_audit_security_alerts_request_at"}
-	if exists, err := i.tableExists(ctx, "review_job_entries"); err != nil {
-		return false, err.Error()
-	} else if exists {
-		required = append(required, "idx_review_job_entries_audit_entry")
+func (i *Indexer) loadCleanupCatalogStatus(ctx context.Context) {
+	cursor, completedAt, err := i.cleanupCatalogMaintenanceState(ctx)
+	if err != nil {
+		i.setCleanupCatalogStatus(false, err, 0, 0)
+		return
 	}
-	for _, name := range required {
-		var count int
-		if err := i.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?`, name).Scan(&count); err != nil {
-			return false, err.Error()
+	var maxID int64
+	if err := i.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(id), 0) FROM audit_entries`).Scan(&maxID); err != nil {
+		i.setCleanupCatalogStatus(false, err, cursor, 0)
+		return
+	}
+	if completedAt > 0 {
+		var catalogMaxID int64
+		if err := i.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(audit_entry_id), 0) FROM audit_cleanup_entries`).Scan(&catalogMaxID); err != nil {
+			i.setCleanupCatalogStatus(false, err, cursor, maxID)
+			return
 		}
-		if count == 0 {
-			return false, ""
+		if catalogMaxID < maxID {
+			cursor = catalogMaxID
+			completedAt = 0
+			if err := i.saveCleanupCatalogState(ctx, cursor, 0); err != nil {
+				i.setCleanupCatalogStatus(false, err, cursor, maxID)
+				return
+			}
+		} else {
+			cursor = maxID
 		}
 	}
-	return true, ""
+	i.setCleanupCatalogStatus(completedAt > 0, nil, cursor, maxID)
 }
 
-func (i *Indexer) cleanupIndexStatus() (bool, string) {
+func (i *Indexer) cleanupCatalogMaintenanceState(ctx context.Context) (int64, int64, error) {
+	var cursor, completedAt int64
+	err := i.db.QueryRowContext(ctx, `SELECT cursor, completed_at FROM audit_maintenance WHERE name = ?`, cleanupCatalogMaintenanceName).Scan(&cursor, &completedAt)
+	if err == nil {
+		return cursor, completedAt, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return 0, 0, err
+	}
+	now := time.Now().Unix()
+	if _, err := i.db.ExecContext(ctx, `INSERT INTO audit_maintenance (name, cursor, completed_at, updated_at) VALUES (?, 0, 0, ?)`, cleanupCatalogMaintenanceName, now); err != nil {
+		return 0, 0, err
+	}
+	return 0, 0, nil
+}
+
+func (i *Indexer) saveCleanupCatalogState(ctx context.Context, cursor, completedAt int64) error {
+	now := time.Now().Unix()
+	_, err := i.db.ExecContext(ctx, `INSERT INTO audit_maintenance (name, cursor, completed_at, updated_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(name) DO UPDATE SET cursor = excluded.cursor, completed_at = excluded.completed_at, updated_at = excluded.updated_at`,
+		cleanupCatalogMaintenanceName, cursor, completedAt, now)
+	return err
+}
+
+func (i *Indexer) cleanupCatalogStatus() (bool, string, int64, int64) {
 	i.statusMu.Lock()
 	defer i.statusMu.Unlock()
-	return i.cleanupIndexReady, i.cleanupIndexError
+	return i.cleanupCatalogReady, i.cleanupCatalogError, i.cleanupCatalogCursor, i.cleanupCatalogMaxID
 }
 
-func (i *Indexer) setCleanupIndexStatus(ready bool, err error) {
+func (i *Indexer) setCleanupCatalogStatus(ready bool, err error, cursor, maxID int64) {
 	i.statusMu.Lock()
-	i.cleanupIndexReady = ready
+	i.cleanupCatalogReady = ready
+	i.cleanupCatalogCursor = cursor
+	i.cleanupCatalogMaxID = maxID
 	if err == nil {
-		i.cleanupIndexError = ""
+		i.cleanupCatalogError = ""
 	} else {
-		i.cleanupIndexError = err.Error()
+		i.cleanupCatalogError = err.Error()
 	}
 	i.statusMu.Unlock()
 }
@@ -786,7 +879,11 @@ func scanCleanupJob(row cleanupRowScanner) (CleanupJob, error) {
 }
 
 func waitCleanupBatch(ctx context.Context) error {
-	timer := time.NewTimer(cleanupBatchPause)
+	return waitWithContext(ctx, cleanupBatchPause)
+}
+
+func waitWithContext(ctx context.Context, duration time.Duration) error {
+	timer := time.NewTimer(duration)
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
