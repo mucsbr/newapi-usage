@@ -1233,6 +1233,7 @@
         </div>
         <div class="log-controls">
           <div id="health" class="pill">checking</div>
+          <button id="openCleanup" class="secondary" type="button">数据清理</button>
           <button id="openSecurityAlerts" class="secondary" type="button">安全告警</button>
           <button id="openReview" class="secondary" type="button">内容审查</button>
           <button id="logout" class="secondary" type="button">退出</button>
@@ -2581,6 +2582,9 @@
       });
       el("openReview").addEventListener("click", () => {
         window.location.href = "/review.html";
+      });
+      el("openCleanup").addEventListener("click", () => {
+        window.location.href = "/cleanup.html";
       });
       el("openSecurityAlerts").addEventListener("click", () => {
         window.location.href = "/security.html";

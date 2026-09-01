@@ -11,6 +11,19 @@ import (
 )
 
 func (m *Manager) CreateJob(ctx context.Context, input JobInput) (Job, error) {
+	var cleanupTableExists int
+	if err := m.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'audit_cleanup_jobs'`).Scan(&cleanupTableExists); err != nil {
+		return Job{}, err
+	}
+	if cleanupTableExists > 0 {
+		var activeCleanup int64
+		if err := m.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_cleanup_jobs WHERE status IN ('queued', 'running')`).Scan(&activeCleanup); err != nil {
+			return Job{}, err
+		}
+		if activeCleanup > 0 {
+			return Job{}, fmt.Errorf("audit cleanup is active; wait for it to finish before creating a review job")
+		}
+	}
 	settings, err := m.loadSettings(ctx)
 	if err != nil {
 		return Job{}, err

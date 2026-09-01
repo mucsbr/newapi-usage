@@ -27,12 +27,15 @@ type Indexer struct {
 	resolver     TokenResolver
 	timeLocation *time.Location
 
-	scanMu sync.Mutex
-	wg     sync.WaitGroup
+	scanMu      sync.Mutex
+	wg          sync.WaitGroup
+	cleanupWake chan struct{}
 
-	statusMu      sync.Mutex
-	lastScanAt    int64
-	lastScanError string
+	statusMu          sync.Mutex
+	lastScanAt        int64
+	lastScanError     string
+	cleanupIndexReady bool
+	cleanupIndexError string
 }
 
 type fileState struct {
@@ -112,11 +115,22 @@ func Open(cfg Config, resolver TokenResolver) (*Indexer, error) {
 	}
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
-	idx := &Indexer{db: db, cfg: cfg, resolver: resolver, timeLocation: location}
+	idx := &Indexer{
+		db:           db,
+		cfg:          cfg,
+		resolver:     resolver,
+		timeLocation: location,
+		cleanupWake:  make(chan struct{}, 1),
+	}
 	if err := idx.initSchema(context.Background()); err != nil {
 		db.Close()
 		return nil, err
 	}
+	if _, err := idx.db.Exec(`UPDATE audit_cleanup_jobs SET status = ?, updated_at = ? WHERE status = ?`, CleanupStatusQueued, time.Now().Unix(), CleanupStatusRunning); err != nil {
+		db.Close()
+		return nil, err
+	}
+	idx.cleanupIndexReady, idx.cleanupIndexError = idx.cleanupIndexesState(context.Background())
 	return idx, nil
 }
 
@@ -137,6 +151,16 @@ func (i *Indexer) Start(ctx context.Context) {
 	go func() {
 		defer i.wg.Done()
 		i.runLegacyBodyCompression(ctx)
+	}()
+	i.wg.Add(1)
+	go func() {
+		defer i.wg.Done()
+		i.runCleanupIndexPreparation(ctx)
+	}()
+	i.wg.Add(1)
+	go func() {
+		defer i.wg.Done()
+		i.runCleanupJobs(ctx)
 	}()
 }
 
@@ -485,12 +509,35 @@ func (i *Indexer) initSchema(ctx context.Context) error {
 			completed_at INTEGER NOT NULL DEFAULT 0,
 			updated_at INTEGER NOT NULL DEFAULT 0
 		)`,
+		`CREATE TABLE IF NOT EXISTS audit_cleanup_jobs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			start_at INTEGER NOT NULL,
+			end_at INTEGER NOT NULL,
+			status TEXT NOT NULL DEFAULT 'queued',
+			estimated_entries INTEGER NOT NULL DEFAULT 0,
+			estimated_alerts INTEGER NOT NULL DEFAULT 0,
+			estimated_matches INTEGER NOT NULL DEFAULT 0,
+			estimated_review_entries INTEGER NOT NULL DEFAULT 0,
+			estimated_bytes INTEGER NOT NULL DEFAULT 0,
+			deleted_entries INTEGER NOT NULL DEFAULT 0,
+			deleted_alerts INTEGER NOT NULL DEFAULT 0,
+			deleted_matches INTEGER NOT NULL DEFAULT 0,
+			deleted_review_entries INTEGER NOT NULL DEFAULT 0,
+			deleted_bytes INTEGER NOT NULL DEFAULT 0,
+			cancel_requested INTEGER NOT NULL DEFAULT 0,
+			error TEXT NOT NULL DEFAULT '',
+			created_at INTEGER NOT NULL,
+			started_at INTEGER NOT NULL DEFAULT 0,
+			completed_at INTEGER NOT NULL DEFAULT 0,
+			updated_at INTEGER NOT NULL
+		)`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_entries_token_time ON audit_entries(token_id, created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_entries_request_id ON audit_entries(request_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_entries_model ON audit_entries(model)`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_security_alerts_request_id ON audit_security_alerts(request_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_security_alerts_token_time ON audit_security_alerts(token_id, request_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_log_audit_matches_entry ON log_audit_matches(audit_entry_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_cleanup_jobs_status ON audit_cleanup_jobs(status, id)`,
 	}
 	for _, statement := range statements {
 		if _, err := i.db.ExecContext(ctx, statement); err != nil {
