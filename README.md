@@ -182,12 +182,15 @@ The card uses Dashboard V3: accounts come from `/dashboard/api/v3/accounts`, Go 
 Zhipu GLM Coding Plan quota card:
 
 ```env
+ZHIPU_ENABLED=true
 ZHIPU_API_BASE=https://open.bigmodel.cn
-ZHIPU_API_KEY=your-zhipu-api-key
 ZHIPU_LABEL=智谱 GLM
+ZHIPU_ACCOUNTS_PATH=/var/lib/newapi-usage/zhipu-accounts.json
+# Optional legacy key, migrated to the accounts file on first startup:
+# ZHIPU_API_KEY=your-zhipu-api-key
 ```
 
-The card reads `/api/monitor/usage/quota/limit` and shows remaining model quota for the 5-hour and weekly windows, plus remaining monthly MCP/tool calls and each tool's usage details. Reset timestamps are converted from milliseconds and displayed in the browser's local timezone.
+The card stores multiple named API keys in `ZHIPU_ACCOUNTS_PATH`. Administrators can add, update, and delete keys from the card; raw keys are stored with file mode `0600` and are never returned to the browser. Every account reads `/api/monitor/usage/quota/limit` and shows remaining model quota for the 5-hour and weekly windows, plus remaining monthly MCP/tool calls and each tool's usage details. Reset timestamps are converted from milliseconds and displayed in the browser's local timezone.
 
 XFYun MaaS coding-plan card:
 
@@ -216,6 +219,9 @@ GET /api/channels/balance
 GET /api/channels/{channel}/balance?force=true
 GET /api/channels/sub2api/accounts/{account_id}/usage?force=true&timezone=Asia/Shanghai
 POST /api/channels/opencode/accounts/{account_id}/usage/refresh
+POST /api/channels/zhipu/accounts
+PUT /api/channels/zhipu/accounts/{account_id}
+DELETE /api/channels/zhipu/accounts/{account_id}
 POST /api/channels/xfyun/accounts
 PUT /api/channels/xfyun/accounts/{account_id}
 DELETE /api/channels/xfyun/accounts/{account_id}

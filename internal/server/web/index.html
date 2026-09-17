@@ -593,6 +593,85 @@
         border-top: 1px solid var(--line);
       }
 
+      .zhipu-accounts {
+        display: grid;
+        gap: 10px;
+        max-height: 420px;
+        overflow: auto;
+        border-top: 1px solid var(--line);
+        padding-top: 10px;
+      }
+
+      .zhipu-account {
+        display: grid;
+        gap: 7px;
+        min-width: 0;
+      }
+
+      .zhipu-account + .zhipu-account {
+        border-top: 1px solid var(--line);
+        padding-top: 10px;
+      }
+
+      .zhipu-account-head,
+      .zhipu-account-title,
+      .zhipu-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+      }
+
+      .zhipu-account-head {
+        justify-content: space-between;
+      }
+
+      .zhipu-account-title {
+        overflow: hidden;
+      }
+
+      .zhipu-account-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 11px;
+        font-weight: 650;
+      }
+
+      .zhipu-key-tail {
+        color: var(--muted);
+        font-size: 10px;
+        white-space: nowrap;
+      }
+
+      .zhipu-actions button {
+        width: 24px;
+        height: 20px;
+        padding: 0;
+        justify-content: center;
+      }
+
+      .zhipu-form {
+        display: grid;
+        grid-template-columns: minmax(70px, 0.35fr) minmax(0, 1fr) auto;
+        gap: 6px;
+        border-top: 1px solid var(--line);
+        padding-top: 10px;
+      }
+
+      .zhipu-form input {
+        min-width: 0;
+        height: 30px;
+        padding: 0 9px;
+        font-size: 11px;
+      }
+
+      .zhipu-form button {
+        height: 30px;
+        padding: 0 10px;
+        font-size: 11px;
+      }
+
       .zhipu-limit {
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;
@@ -1650,6 +1729,7 @@
         attachChannelRefreshHandlers(root);
         attachSub2APIHandlers(root);
         attachOpenCodeHandlers(root);
+        attachZhipuHandlers(root);
         attachXFYunHandlers(root);
       }
 
@@ -1961,17 +2041,54 @@
 
       function zhipuCardHTML(c) {
         if (!c.ok) {
-          return cardShell(c, `<span class="pill error">异常</span>`, `<div class="channel-error">${escapeHtml(c.error || "获取失败")}</div>`);
+          return cardShell(c, `<span class="pill error">异常</span>`, `<div class="channel-error">${escapeHtml(c.error || "获取失败")}</div>${zhipuAddFormHTML()}`);
         }
         const summary = c.zhipu || {};
-        const limits = summary.limits || [];
-        const level = String(summary.level || "套餐").toUpperCase();
-        const pill = `<span class="pill success">${escapeHtml(level)}</span>`;
-        const foot = `<div class="pool-foot"><span>更新于 ${tsToText(c.updated_at)}</span><span>剩余额度</span></div>`;
-        const list = limits.length
+        const accounts = summary.accounts || [];
+        const pill = `<span class="pill success">${fmt.format(summary.total || accounts.length)} 账号</span>`;
+        const foot = `<div class="pool-foot"><span>更新于 ${tsToText(c.updated_at)}</span><span>账号额度</span></div>`;
+        const list = accounts.length
+          ? `<div class="zhipu-accounts">${accounts.map(zhipuAccountHTML).join("")}</div>`
+          : `<div class="muted">尚未添加智谱 Key</div>`;
+        return cardShell(c, pill, foot + list + zhipuAddFormHTML());
+      }
+
+      function zhipuAddFormHTML() {
+        return `
+          <form class="zhipu-form" data-zhipu-add>
+            <input name="name" type="text" placeholder="名称" autocomplete="off" />
+            <input name="api_key" type="password" placeholder="API Key" autocomplete="off" required />
+            <button type="submit">添加</button>
+          </form>
+        `;
+      }
+
+      function zhipuAccountHTML(account) {
+        const ok = account.status === "ok";
+        const level = String(account.level || "套餐").toUpperCase();
+        const status = ok
+          ? `<span class="pill success">${escapeHtml(level)}</span>`
+          : `<span class="pill error" title="${escapeHtml(account.error || "获取失败")}">异常</span>`;
+        const limits = account.limits || [];
+        const body = limits.length
           ? `<div class="zhipu-list">${limits.map(zhipuLimitHTML).join("")}</div>`
-          : `<div class="muted">没有额度数据</div>`;
-        return cardShell(c, pill, foot + list);
+          : `<div class="muted">${escapeHtml(account.error || "没有额度数据")}</div>`;
+        return `
+          <div class="zhipu-account" data-zhipu-account-id="${account.id}">
+            <div class="zhipu-account-head">
+              <div class="zhipu-account-title">
+                <span class="zhipu-account-name">${escapeHtml(account.name || `账号 #${account.id}`)}</span>
+                <span class="zhipu-key-tail">••••${escapeHtml(account.key_tail || "")}</span>
+                ${status}
+              </div>
+              <span class="zhipu-actions">
+                <button class="secondary small zhipu-update" type="button" data-account-id="${account.id}" title="更新 API Key">↻</button>
+                <button class="secondary small zhipu-delete" type="button" data-account-id="${account.id}" title="删除账号">×</button>
+              </span>
+            </div>
+            ${body}
+          </div>
+        `;
       }
 
       function zhipuLimitHTML(limit) {
@@ -1990,6 +2107,62 @@
           .map((item) => `${item.model_code} ${fmt.format(Number(item.usage || 0))}`)
           .join(" · ");
         return `<div class="zhipu-limit"><span class="zhipu-limit-name">${escapeHtml(limit.name || limit.type || "额度")}</span><span class="pill ${cls}" title="${escapeHtml(used)}">${escapeHtml(value)}</span><span class="zhipu-limit-meta">${escapeHtml([used, reset].filter(Boolean).join(" · "))}</span>${details ? `<span class="zhipu-details">${escapeHtml(details)}</span>` : ""}</div>`;
+      }
+
+      function attachZhipuHandlers(root = document) {
+        root.querySelectorAll("[data-zhipu-add]").forEach((form) => {
+          form.addEventListener("submit", (event) => {
+            event.preventDefault();
+            addZhipuAccount(form).catch(notifyError);
+          });
+        });
+        root.querySelectorAll(".zhipu-update").forEach((button) => {
+          button.addEventListener("click", () => updateZhipuAccount(button).catch(notifyError));
+        });
+        root.querySelectorAll(".zhipu-delete").forEach((button) => {
+          button.addEventListener("click", () => deleteZhipuAccount(button).catch(notifyError));
+        });
+      }
+
+      async function addZhipuAccount(form) {
+        const name = form.elements.name.value.trim();
+        const apiKey = form.elements.api_key.value.trim();
+        if (!apiKey) throw new Error("请输入智谱 API Key");
+        const button = form.querySelector("button");
+        button.disabled = true;
+        try {
+          await postJSON("/api/channels/zhipu/accounts", { name, api_key: apiKey });
+          form.reset();
+          await loadChannel("zhipu", true);
+        } finally {
+          button.disabled = false;
+        }
+      }
+
+      async function updateZhipuAccount(button) {
+        const accountId = button.dataset.accountId;
+        if (!accountId) return;
+        const value = window.prompt("粘贴新的智谱 API Key");
+        if (!value || !value.trim()) return;
+        button.disabled = true;
+        try {
+          await putJSON(`/api/channels/zhipu/accounts/${accountId}`, { api_key: value.trim() });
+          await loadChannel("zhipu", true);
+        } finally {
+          button.disabled = false;
+        }
+      }
+
+      async function deleteZhipuAccount(button) {
+        const accountId = button.dataset.accountId;
+        if (!accountId || !window.confirm("删除这个智谱账号？")) return;
+        button.disabled = true;
+        try {
+          await deleteJSON(`/api/channels/zhipu/accounts/${accountId}`);
+          await loadChannel("zhipu", true);
+        } finally {
+          button.disabled = false;
+        }
       }
 
       function attachOpenCodeHandlers(root = document) {

@@ -70,10 +70,12 @@ type Config struct {
 	OpenCodeConcurrency int
 
 	// Zhipu GLM Coding Plan quota.
-	ZhipuAPIBase string
-	ZhipuAPIKey  string
-	ZhipuLabel   string
-	ZhipuTimeout time.Duration
+	ZhipuManageEnabled bool
+	ZhipuAPIBase       string
+	ZhipuAPIKey        string
+	ZhipuLabel         string
+	ZhipuAccountsPath  string
+	ZhipuTimeout       time.Duration
 
 	// Ikun quota enrichment for the matching Sub2API account.
 	IkunAPIBase           string
@@ -138,10 +140,12 @@ func Load() (Config, error) {
 		OpenCodeTimeout:     time.Duration(getEnvInt("OPENCODE_TIMEOUT_SECONDS", 30)) * time.Second,
 		OpenCodeConcurrency: getEnvInt("OPENCODE_CONCURRENCY", 5),
 
-		ZhipuAPIBase: getEnv("ZHIPU_API_BASE", "https://open.bigmodel.cn"),
-		ZhipuAPIKey:  getEnv("ZHIPU_API_KEY", ""),
-		ZhipuLabel:   getEnv("ZHIPU_LABEL", "智谱 GLM"),
-		ZhipuTimeout: time.Duration(getEnvInt("ZHIPU_TIMEOUT_SECONDS", 15)) * time.Second,
+		ZhipuManageEnabled: getEnvBool("ZHIPU_ENABLED", false),
+		ZhipuAPIBase:       getEnv("ZHIPU_API_BASE", "https://open.bigmodel.cn"),
+		ZhipuAPIKey:        getEnv("ZHIPU_API_KEY", ""),
+		ZhipuLabel:         getEnv("ZHIPU_LABEL", "智谱 GLM"),
+		ZhipuAccountsPath:  getEnv("ZHIPU_ACCOUNTS_PATH", "/var/lib/newapi-usage/zhipu-accounts.json"),
+		ZhipuTimeout:       time.Duration(getEnvInt("ZHIPU_TIMEOUT_SECONDS", 15)) * time.Second,
 
 		IkunAPIBase:           getEnv("IKUN_API_BASE", "https://api.ikuncode.cc"),
 		IkunAccessToken:       firstEnv("IKUN_ACCESS_TOKEN", "IKUN_API_KEY"),
@@ -260,6 +264,9 @@ func Load() (Config, error) {
 	if strings.TrimSpace(cfg.ZhipuLabel) == "" {
 		cfg.ZhipuLabel = "智谱 GLM"
 	}
+	if strings.TrimSpace(cfg.ZhipuAccountsPath) == "" {
+		cfg.ZhipuAccountsPath = "/var/lib/newapi-usage/zhipu-accounts.json"
+	}
 	if cfg.ZhipuTimeout <= 0 {
 		cfg.ZhipuTimeout = 15 * time.Second
 	}
@@ -317,7 +324,7 @@ func (c Config) OpenCodeEnabled() bool {
 }
 
 func (c Config) ZhipuEnabled() bool {
-	return strings.TrimSpace(c.ZhipuAPIKey) != ""
+	return c.ZhipuManageEnabled || strings.TrimSpace(c.ZhipuAPIKey) != ""
 }
 
 func (c Config) IkunEnabled() bool {

@@ -76,6 +76,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/channels", s.handleChannelsManifest)
 	s.mux.HandleFunc("/api/channels/sub2api/accounts/", s.handleSub2APIUsage)
 	s.mux.HandleFunc("/api/channels/opencode/accounts/", s.handleOpenCodeUsage)
+	s.mux.HandleFunc("/api/channels/zhipu/accounts", s.handleZhipuAccounts)
+	s.mux.HandleFunc("/api/channels/zhipu/accounts/", s.handleZhipuAccount)
 	s.mux.HandleFunc("/api/channels/xfyun/accounts", s.handleXFYunAccounts)
 	s.mux.HandleFunc("/api/channels/xfyun/accounts/", s.handleXFYunAccount)
 	s.mux.HandleFunc("/api/channels/", s.handleChannelSubroutes)
@@ -500,6 +502,85 @@ func (s *Server) handleOpenCodeUsage(w http.ResponseWriter, r *http.Request) {
 type xfyunAccountRequest struct {
 	Name         *string `json:"name"`
 	SSOSessionID *string `json:"sso_session_id"`
+}
+
+type zhipuAccountRequest struct {
+	Name   *string `json:"name"`
+	APIKey *string `json:"api_key"`
+}
+
+func (s *Server) handleZhipuAccounts(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if s.channels == nil || !s.channels.Enabled() {
+		writeError(w, http.StatusNotFound, "channels not configured")
+		return
+	}
+	var req zhipuAccountRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.APIKey == nil || strings.TrimSpace(*req.APIKey) == "" {
+		writeError(w, http.StatusBadRequest, "api key is required")
+		return
+	}
+	name := ""
+	if req.Name != nil {
+		name = *req.Name
+	}
+	data, err := s.channels.AddZhipuAccount(r.Context(), name, *req.APIKey)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, data)
+}
+
+func (s *Server) handleZhipuAccount(w http.ResponseWriter, r *http.Request) {
+	if s.channels == nil || !s.channels.Enabled() {
+		writeError(w, http.StatusNotFound, "channels not configured")
+		return
+	}
+	trimmed := strings.TrimPrefix(r.URL.Path, "/api/channels/zhipu/accounts/")
+	parts := strings.Split(strings.Trim(trimmed, "/"), "/")
+	if len(parts) != 1 {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	accountID, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil || accountID <= 0 {
+		writeError(w, http.StatusBadRequest, "invalid account id")
+		return
+	}
+	switch r.Method {
+	case http.MethodPut, http.MethodPatch:
+		var req zhipuAccountRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		if req.Name == nil && req.APIKey == nil {
+			writeError(w, http.StatusBadRequest, "nothing to update")
+			return
+		}
+		data, err := s.channels.UpdateZhipuAccount(r.Context(), accountID, req.Name, req.APIKey)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, data)
+	case http.MethodDelete:
+		if err := s.channels.DeleteZhipuAccount(accountID); err != nil {
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
 }
 
 func (s *Server) handleXFYunAccounts(w http.ResponseWriter, r *http.Request) {

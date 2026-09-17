@@ -2,9 +2,13 @@ package channels
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -23,24 +27,92 @@ func TestZhipuQuotaParsing(t *testing.T) {
 	}))
 	defer server.Close()
 
-	provider := newZhipu(zhipuConfig{Label: "智谱 GLM", BaseURL: server.URL, APIKey: "zhipu-test", Timeout: 5 * time.Second})
+	accountsPath := filepath.Join(t.TempDir(), "zhipu-accounts.json")
+	provider := newZhipu(zhipuConfig{Label: "智谱 GLM", BaseURL: server.URL, LegacyAPIKey: "zhipu-test", AccountsPath: accountsPath, Timeout: 5 * time.Second})
 	balance := provider.Balance(context.Background())
 	if !balance.OK || balance.Kind != KindZhipu || balance.Zhipu == nil {
 		t.Fatalf("unexpected balance: %+v", balance)
 	}
-	if balance.Zhipu.Level != "max" || len(balance.Zhipu.Limits) != 3 {
+	if balance.Zhipu.Total != 1 || len(balance.Zhipu.Accounts) != 1 {
 		t.Fatalf("unexpected summary: %+v", balance.Zhipu)
 	}
-	fiveHour := balance.Zhipu.Limits[0]
+	account := balance.Zhipu.Accounts[0]
+	if account.Name != "默认账号" || account.KeyTail != "ipu-test" || account.Level != "max" || len(account.Limits) != 3 {
+		t.Fatalf("unexpected account: %+v", account)
+	}
+	fiveHour := account.Limits[0]
 	if fiveHour.Name != "5小时" || fiveHour.RemainingPercent != 99 || fiveHour.NextResetAt != 1787771961 {
 		t.Fatalf("unexpected 5-hour limit: %+v", fiveHour)
 	}
-	weekly := balance.Zhipu.Limits[1]
+	weekly := account.Limits[1]
 	if weekly.Name != "周" || weekly.RemainingPercent != 77 {
 		t.Fatalf("unexpected weekly limit: %+v", weekly)
 	}
-	tools := balance.Zhipu.Limits[2]
+	tools := account.Limits[2]
 	if tools.Name != "工具调用（月）" || tools.Total != 4000 || tools.Used != 1 || tools.Remaining != 3999 || len(tools.Details) != 1 {
 		t.Fatalf("unexpected tool limit: %+v", tools)
+	}
+	stored, err := os.ReadFile(accountsPath)
+	if err != nil || !strings.Contains(string(stored), "zhipu-test") {
+		t.Fatalf("legacy key was not persisted: body=%s err=%v", stored, err)
+	}
+	info, err := os.Stat(accountsPath)
+	if err != nil {
+		t.Fatalf("stat accounts file: %v", err)
+	}
+	if info.Mode().Perm() != 0600 {
+		t.Fatalf("accounts file mode = %v, want 0600", info.Mode().Perm())
+	}
+	encoded, err := json.Marshal(balance)
+	if err != nil {
+		t.Fatalf("marshal balance: %v", err)
+	}
+	if strings.Contains(string(encoded), "zhipu-test") {
+		t.Fatalf("balance leaked full api key: %s", encoded)
+	}
+}
+
+func TestZhipuAccountManagement(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/monitor/usage/quota/limit" {
+			http.NotFound(w, r)
+			return
+		}
+		if !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer key-") {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		_, _ = io.WriteString(w, `{"code":200,"msg":"ok","success":true,"data":{"level":"pro","limits":[{"type":"TOKENS_LIMIT","unit":6,"number":1,"percentage":25}]}}`)
+	}))
+	defer server.Close()
+
+	accountsPath := filepath.Join(t.TempDir(), "zhipu-accounts.json")
+	provider := newZhipu(zhipuConfig{Label: "智谱 GLM", BaseURL: server.URL, AccountsPath: accountsPath, Timeout: 5 * time.Second})
+	first, err := provider.AddAccount(context.Background(), "主账号", "Bearer key-first")
+	if err != nil || first.Status != "ok" || first.KeyTail != "ey-first" {
+		t.Fatalf("add first account: account=%+v err=%v", first, err)
+	}
+	second, err := provider.AddAccount(context.Background(), "备用", "key-second")
+	if err != nil || second.ID == first.ID {
+		t.Fatalf("add second account: account=%+v err=%v", second, err)
+	}
+	updatedKey := "key-updated"
+	updated, err := provider.UpdateAccount(context.Background(), first.ID, nil, &updatedKey)
+	if err != nil || updated.KeyTail != "-updated" || updated.Status != "ok" {
+		t.Fatalf("update account: account=%+v err=%v", updated, err)
+	}
+	if err := provider.DeleteAccount(second.ID); err != nil {
+		t.Fatalf("delete account: %v", err)
+	}
+	balance := provider.Refresh(context.Background())
+	if balance.Zhipu == nil || balance.Zhipu.Total != 1 || len(balance.Zhipu.Accounts) != 1 || balance.Zhipu.Accounts[0].ID != first.ID {
+		t.Fatalf("unexpected managed balance: %+v", balance)
+	}
+	stored, err := os.ReadFile(accountsPath)
+	if err != nil {
+		t.Fatalf("read accounts file: %v", err)
+	}
+	if !strings.Contains(string(stored), "key-updated") || strings.Contains(string(stored), "key-second") {
+		t.Fatalf("unexpected stored accounts: %s", stored)
 	}
 }

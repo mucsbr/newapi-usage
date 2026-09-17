@@ -183,8 +183,20 @@ type OpenCodeUsageWindow struct {
 }
 
 type ZhipuSummary struct {
-	Level  string       `json:"level"`
-	Limits []ZhipuLimit `json:"limits"`
+	Total    int            `json:"total"`
+	Accounts []ZhipuAccount `json:"accounts"`
+}
+
+type ZhipuAccount struct {
+	ID        int64        `json:"id"`
+	Name      string       `json:"name"`
+	KeyTail   string       `json:"key_tail"`
+	Status    string       `json:"status"`
+	Error     string       `json:"error,omitempty"`
+	Level     string       `json:"level,omitempty"`
+	Limits    []ZhipuLimit `json:"limits,omitempty"`
+	CreatedAt int64        `json:"created_at,omitempty"`
+	UpdatedAt int64        `json:"updated_at,omitempty"`
 }
 
 type ZhipuLimit struct {

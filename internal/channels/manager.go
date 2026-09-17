@@ -9,6 +9,7 @@ import (
 
 var errSub2APINotConfigured = errors.New("sub2api is not configured")
 var errOpenCodeNotConfigured = errors.New("opencode is not configured")
+var errZhipuNotConfigured = errors.New("zhipu is not configured")
 var errXFYunNotConfigured = errors.New("xfyun is not configured")
 var errChannelNotConfigured = errors.New("channel is not configured")
 
@@ -73,10 +74,11 @@ func New(cfg config.Config) *Manager {
 	}
 	if cfg.ZhipuEnabled() {
 		m.zhipu = newZhipu(zhipuConfig{
-			Label:   cfg.ZhipuLabel,
-			BaseURL: cfg.ZhipuAPIBase,
-			APIKey:  cfg.ZhipuAPIKey,
-			Timeout: cfg.ZhipuTimeout,
+			Label:        cfg.ZhipuLabel,
+			BaseURL:      cfg.ZhipuAPIBase,
+			LegacyAPIKey: cfg.ZhipuAPIKey,
+			AccountsPath: cfg.ZhipuAccountsPath,
+			Timeout:      cfg.ZhipuTimeout,
 		})
 	}
 	if cfg.XFYunChannelEnabled() {
@@ -255,4 +257,25 @@ func (m *Manager) DeleteXFYunAccount(id int64) error {
 		return errXFYunNotConfigured
 	}
 	return m.xfyun.DeleteAccount(id)
+}
+
+func (m *Manager) AddZhipuAccount(ctx context.Context, name string, apiKey string) (ZhipuAccount, error) {
+	if m == nil || m.zhipu == nil {
+		return ZhipuAccount{}, errZhipuNotConfigured
+	}
+	return m.zhipu.AddAccount(ctx, name, apiKey)
+}
+
+func (m *Manager) UpdateZhipuAccount(ctx context.Context, id int64, name *string, apiKey *string) (ZhipuAccount, error) {
+	if m == nil || m.zhipu == nil {
+		return ZhipuAccount{}, errZhipuNotConfigured
+	}
+	return m.zhipu.UpdateAccount(ctx, id, name, apiKey)
+}
+
+func (m *Manager) DeleteZhipuAccount(id int64) error {
+	if m == nil || m.zhipu == nil {
+		return errZhipuNotConfigured
+	}
+	return m.zhipu.DeleteAccount(id)
 }
