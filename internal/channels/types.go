@@ -188,15 +188,30 @@ type ZhipuSummary struct {
 }
 
 type ZhipuAccount struct {
-	ID        int64        `json:"id"`
-	Name      string       `json:"name"`
-	KeyTail   string       `json:"key_tail"`
-	Status    string       `json:"status"`
-	Error     string       `json:"error,omitempty"`
-	Level     string       `json:"level,omitempty"`
-	Limits    []ZhipuLimit `json:"limits,omitempty"`
-	CreatedAt int64        `json:"created_at,omitempty"`
-	UpdatedAt int64        `json:"updated_at,omitempty"`
+	ID         int64              `json:"id"`
+	Name       string             `json:"name"`
+	KeyTail    string             `json:"key_tail"`
+	Status     string             `json:"status"`
+	Error      string             `json:"error,omitempty"`
+	Level      string             `json:"level,omitempty"`
+	Limits     []ZhipuLimit       `json:"limits,omitempty"`
+	Resets     *ZhipuResetSummary `json:"resets,omitempty"`
+	ResetError string             `json:"reset_error,omitempty"`
+	CreatedAt  int64              `json:"created_at,omitempty"`
+	UpdatedAt  int64              `json:"updated_at,omitempty"`
+}
+
+type ZhipuResetSummary struct {
+	FiveHour            ZhipuResetWindow `json:"five_hour"`
+	Week                ZhipuResetWindow `json:"week"`
+	LastFiveHourResetAt string           `json:"last_five_hour_reset_at,omitempty"`
+	LastWeekResetAt     string           `json:"last_week_reset_at,omitempty"`
+}
+
+type ZhipuResetWindow struct {
+	Available     int    `json:"available"`
+	Total         int    `json:"total"`
+	NextExpiresAt string `json:"next_expires_at,omitempty"`
 }
 
 type ZhipuLimit struct {

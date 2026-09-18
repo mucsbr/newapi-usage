@@ -651,6 +651,38 @@
         justify-content: center;
       }
 
+      .zhipu-reset-options {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+
+      .zhipu-reset-option {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        min-width: 0;
+      }
+
+      .zhipu-reset-option .pill {
+        height: 20px;
+        padding: 0 6px;
+        font-size: 10px;
+      }
+
+      .zhipu-reset-option button {
+        height: 22px;
+        padding: 0 7px;
+        font-size: 10px;
+      }
+
+      .zhipu-reset-expiry {
+        color: var(--muted);
+        font-size: 10px;
+        white-space: nowrap;
+      }
+
       .zhipu-form {
         display: grid;
         grid-template-columns: minmax(70px, 0.35fr) minmax(0, 1fr) auto;
@@ -2086,9 +2118,34 @@
                 <button class="secondary small zhipu-delete" type="button" data-account-id="${account.id}" title="删除账号">×</button>
               </span>
             </div>
+            ${zhipuResetOptionsHTML(account)}
             ${body}
           </div>
         `;
+      }
+
+      function zhipuResetOptionsHTML(account) {
+        const resets = account.resets;
+        if (!resets) {
+          return account.reset_error ? `<div class="muted" title="${escapeHtml(account.reset_error)}">重置卡查询失败</div>` : "";
+        }
+        return `<div class="zhipu-reset-options">
+          ${zhipuResetOptionHTML(account.id, "5小时", "FIVE_HOUR", resets.five_hour, resets.last_five_hour_reset_at)}
+          ${zhipuResetOptionHTML(account.id, "周", "WEEK", resets.week, resets.last_week_reset_at)}
+        </div>`;
+      }
+
+      function zhipuResetOptionHTML(accountId, label, resetType, window, lastResetAt) {
+        const data = window || {};
+        const available = Number(data.available || 0);
+        const total = Number(data.total || 0);
+        const expires = data.next_expires_at ? `到期 ${shortTime(data.next_expires_at)}` : "";
+        const lastReset = lastResetAt ? `最近重置 ${shortTime(lastResetAt)}` : "";
+        const title = [label + "重置卡", `可用 ${available} / 共 ${total}`, expires, lastReset].filter(Boolean).join(" · ");
+        if (available > 0) {
+          return `<span class="zhipu-reset-option" title="${escapeHtml(title)}"><button class="secondary small zhipu-reset" type="button" data-account-id="${accountId}" data-reset-type="${resetType}" data-reset-label="${escapeHtml(label)}">↻ ${escapeHtml(label)} ${available}</button>${expires ? `<span class="zhipu-reset-expiry">${escapeHtml(expires)}</span>` : ""}</span>`;
+        }
+        return `<span class="zhipu-reset-option" title="${escapeHtml(title)}"><span class="pill">${escapeHtml(label)}重置 0</span></span>`;
       }
 
       function zhipuLimitHTML(limit) {
@@ -2121,6 +2178,9 @@
         });
         root.querySelectorAll(".zhipu-delete").forEach((button) => {
           button.addEventListener("click", () => deleteZhipuAccount(button).catch(notifyError));
+        });
+        root.querySelectorAll(".zhipu-reset").forEach((button) => {
+          button.addEventListener("click", () => resetZhipuQuota(button).catch(notifyError));
         });
       }
 
@@ -2159,6 +2219,22 @@
         button.disabled = true;
         try {
           await deleteJSON(`/api/channels/zhipu/accounts/${accountId}`);
+          await loadChannel("zhipu", true);
+        } finally {
+          button.disabled = false;
+        }
+      }
+
+      async function resetZhipuQuota(button) {
+        const accountId = button.dataset.accountId;
+        const resetType = button.dataset.resetType;
+        const label = button.dataset.resetLabel || "额度";
+        if (!accountId || !resetType) return;
+        const extra = resetType === "WEEK" ? "周额度和 5 小时额度都会恢复到 100%。" : "5 小时额度会恢复到 100%。";
+        if (!window.confirm(`使用 1 次${label}重置卡？${extra}此操作不可撤销。`)) return;
+        button.disabled = true;
+        try {
+          await postJSON(`/api/channels/zhipu/accounts/${accountId}/reset`, { reset_type: resetType });
           await loadChannel("zhipu", true);
         } finally {
           button.disabled = false;

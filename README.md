@@ -190,7 +190,7 @@ ZHIPU_ACCOUNTS_PATH=/var/lib/newapi-usage/zhipu-accounts.json
 # ZHIPU_API_KEY=your-zhipu-api-key
 ```
 
-The card stores multiple named API keys in `ZHIPU_ACCOUNTS_PATH`. Administrators can add, update, and delete keys from the card; raw keys are stored with file mode `0600` and are never returned to the browser. Every account reads `/api/monitor/usage/quota/limit` and shows remaining model quota for the 5-hour and weekly windows, plus remaining monthly MCP/tool calls and each tool's usage details. Reset timestamps are converted from milliseconds and displayed in the browser's local timezone.
+The card stores multiple named API keys in `ZHIPU_ACCOUNTS_PATH`. Administrators can add, update, and delete keys from the card; raw keys are stored with file mode `0600` and are never returned to the browser. Every account reads `/api/monitor/usage/quota/limit` and shows remaining model quota for the 5-hour and weekly windows, plus remaining monthly MCP/tool calls and each tool's usage details. It also reads `/api/biz/customer-package-reset/list?targetType=PERSONAL` to show available 5-hour and weekly reset cards. A confirmed reset uses the earliest-expiring available card through `/api/biz/customer-package-reset/use`. Reset timestamps are displayed in the browser's local timezone.
 
 XFYun MaaS coding-plan card:
 
@@ -222,6 +222,7 @@ POST /api/channels/opencode/accounts/{account_id}/usage/refresh
 POST /api/channels/zhipu/accounts
 PUT /api/channels/zhipu/accounts/{account_id}
 DELETE /api/channels/zhipu/accounts/{account_id}
+POST /api/channels/zhipu/accounts/{account_id}/reset
 POST /api/channels/xfyun/accounts
 PUT /api/channels/xfyun/accounts/{account_id}
 DELETE /api/channels/xfyun/accounts/{account_id}

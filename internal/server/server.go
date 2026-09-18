@@ -509,6 +509,10 @@ type zhipuAccountRequest struct {
 	APIKey *string `json:"api_key"`
 }
 
+type zhipuResetRequest struct {
+	ResetType string `json:"reset_type"`
+}
+
 func (s *Server) handleZhipuAccounts(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -546,13 +550,31 @@ func (s *Server) handleZhipuAccount(w http.ResponseWriter, r *http.Request) {
 	}
 	trimmed := strings.TrimPrefix(r.URL.Path, "/api/channels/zhipu/accounts/")
 	parts := strings.Split(strings.Trim(trimmed, "/"), "/")
-	if len(parts) != 1 {
+	if len(parts) < 1 || len(parts) > 2 {
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
 	accountID, err := strconv.ParseInt(parts[0], 10, 64)
 	if err != nil || accountID <= 0 {
 		writeError(w, http.StatusBadRequest, "invalid account id")
+		return
+	}
+	if len(parts) == 2 {
+		if parts[1] != "reset" || r.Method != http.MethodPost {
+			writeError(w, http.StatusNotFound, "not found")
+			return
+		}
+		var req zhipuResetRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		data, err := s.channels.ResetZhipuAccount(r.Context(), accountID, req.ResetType)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, data)
 		return
 	}
 	switch r.Method {

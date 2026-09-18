@@ -2,6 +2,7 @@ package channels
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,11 @@ import (
 )
 
 const zhipuFetchConcurrency = 5
+
+const (
+	zhipuResetFiveHour = "FIVE_HOUR"
+	zhipuResetWeek     = "WEEK"
+)
 
 type zhipuProvider struct {
 	label        string
@@ -77,6 +83,32 @@ type zhipuQuotaLimit struct {
 type zhipuUsageDetails struct {
 	ModelCode string  `json:"modelCode"`
 	Usage     float64 `json:"usage"`
+}
+
+type zhipuResetListResponse struct {
+	Code    int            `json:"code"`
+	Message string         `json:"msg"`
+	Success bool           `json:"success"`
+	Data    zhipuResetData `json:"data"`
+}
+
+type zhipuResetData struct {
+	FiveHourResets        []zhipuResetCard `json:"fiveHourResets"`
+	WeekResets            []zhipuResetCard `json:"weekResets"`
+	LastFiveHourResetTime any              `json:"lastFiveHourResetTime"`
+	LastWeekResetTime     any              `json:"lastWeekResetTime"`
+}
+
+type zhipuResetCard struct {
+	RecordID   int64  `json:"recordId"`
+	ExpireTime string `json:"expireTime"`
+	Available  bool   `json:"available"`
+}
+
+type zhipuResetUseResponse struct {
+	Code    int    `json:"code"`
+	Message string `json:"msg"`
+	Success bool   `json:"success"`
 }
 
 func newZhipu(cfg zhipuConfig) *zhipuProvider {
@@ -248,6 +280,54 @@ func (z *zhipuProvider) DeleteAccount(id int64) error {
 	return z.saveAccountsLocked(file)
 }
 
+func (z *zhipuProvider) ResetAccount(ctx context.Context, id int64, resetType string) (ZhipuAccount, error) {
+	resetType = strings.ToUpper(strings.TrimSpace(resetType))
+	if resetType != zhipuResetFiveHour && resetType != zhipuResetWeek {
+		return ZhipuAccount{}, fmt.Errorf("invalid reset type")
+	}
+	record, err := z.accountRecord(id)
+	if err != nil {
+		return ZhipuAccount{}, err
+	}
+	resetData, err := z.fetchResetData(ctx, record.APIKey)
+	if err != nil {
+		return ZhipuAccount{}, err
+	}
+	cards := resetData.FiveHourResets
+	if resetType == zhipuResetWeek {
+		cards = resetData.WeekResets
+	}
+	card, ok := nextAvailableZhipuReset(cards)
+	if !ok {
+		return ZhipuAccount{}, fmt.Errorf("no available reset card")
+	}
+	if err := z.useResetCard(ctx, record.APIKey, resetType, card.RecordID); err != nil {
+		return ZhipuAccount{}, err
+	}
+	z.mu.Lock()
+	z.invalidateLocked()
+	z.mu.Unlock()
+	return z.fetchAccount(ctx, record), nil
+}
+
+func (z *zhipuProvider) accountRecord(id int64) (zhipuAccountRecord, error) {
+	if id <= 0 {
+		return zhipuAccountRecord{}, fmt.Errorf("invalid account id")
+	}
+	z.mu.Lock()
+	defer z.mu.Unlock()
+	file, err := z.loadAccountsLocked()
+	if err != nil {
+		return zhipuAccountRecord{}, err
+	}
+	for _, account := range file.Accounts {
+		if account.ID == id {
+			return account, nil
+		}
+	}
+	return zhipuAccountRecord{}, fmt.Errorf("account not found")
+}
+
 func (z *zhipuProvider) fetchBalance(ctx context.Context) Balance {
 	now := time.Now().Unix()
 	records, err := z.loadAccounts()
@@ -278,6 +358,13 @@ func (z *zhipuProvider) fetchBalance(ctx context.Context) Balance {
 
 func (z *zhipuProvider) fetchAccount(ctx context.Context, record zhipuAccountRecord) ZhipuAccount {
 	account := ZhipuAccount{ID: record.ID, Name: record.Name, KeyTail: zhipuKeyTail(record.APIKey), Status: "unknown", CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt}
+	resetData, resetErr := z.fetchResetData(ctx, record.APIKey)
+	if resetErr != nil {
+		account.ResetError = resetErr.Error()
+	} else {
+		resets := normalizeZhipuResets(resetData)
+		account.Resets = &resets
+	}
 	level, limits, err := z.fetchQuota(ctx, record.APIKey)
 	if err != nil {
 		account.Status = "error"
@@ -331,6 +418,145 @@ func (z *zhipuProvider) fetchQuota(ctx context.Context, apiKey string) (string, 
 	}
 	sort.SliceStable(limits, func(i, j int) bool { return zhipuLimitRank(limits[i]) < zhipuLimitRank(limits[j]) })
 	return parsed.Data.Level, limits, nil
+}
+
+func (z *zhipuProvider) fetchResetData(ctx context.Context, apiKey string) (zhipuResetData, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, z.base+"/api/biz/customer-package-reset/list?targetType=PERSONAL", nil)
+	if err != nil {
+		return zhipuResetData{}, err
+	}
+	req.Header.Set("Authorization", "Bearer "+normalizeZhipuAPIKey(apiKey))
+	req.Header.Set("Accept", "application/json")
+	resp, err := z.client.Do(req)
+	if err != nil {
+		return zhipuResetData{}, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return zhipuResetData{}, err
+	}
+	if resp.StatusCode >= 400 {
+		return zhipuResetData{}, fmt.Errorf("zhipu reset list http %d", resp.StatusCode)
+	}
+	var parsed zhipuResetListResponse
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return zhipuResetData{}, fmt.Errorf("decode zhipu reset list: %w", err)
+	}
+	if !parsed.Success || parsed.Code != http.StatusOK {
+		return zhipuResetData{}, fmt.Errorf("zhipu reset list %d: %s", parsed.Code, strings.TrimSpace(parsed.Message))
+	}
+	return parsed.Data, nil
+}
+
+func (z *zhipuProvider) useResetCard(ctx context.Context, apiKey string, resetType string, recordID int64) error {
+	requestID, err := randomZhipuRequestID()
+	if err != nil {
+		return err
+	}
+	body, err := json.Marshal(map[string]any{
+		"targetType": "PERSONAL",
+		"resetType":  resetType,
+		"recordId":   recordID,
+		"requestId":  requestID,
+	})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, z.base+"/api/biz/customer-package-reset/use", strings.NewReader(string(body)))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+normalizeZhipuAPIKey(apiKey))
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := z.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	responseBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("zhipu reset http %d", resp.StatusCode)
+	}
+	var parsed zhipuResetUseResponse
+	if err := json.Unmarshal(responseBody, &parsed); err != nil {
+		return fmt.Errorf("decode zhipu reset response: %w", err)
+	}
+	if !parsed.Success {
+		return fmt.Errorf("zhipu reset refused: %s", strings.TrimSpace(parsed.Message))
+	}
+	return nil
+}
+
+func normalizeZhipuResets(data zhipuResetData) ZhipuResetSummary {
+	return ZhipuResetSummary{
+		FiveHour:            normalizeZhipuResetWindow(data.FiveHourResets),
+		Week:                normalizeZhipuResetWindow(data.WeekResets),
+		LastFiveHourResetAt: normalizeZhipuResetTime(data.LastFiveHourResetTime),
+		LastWeekResetAt:     normalizeZhipuResetTime(data.LastWeekResetTime),
+	}
+}
+
+func normalizeZhipuResetWindow(cards []zhipuResetCard) ZhipuResetWindow {
+	window := ZhipuResetWindow{Total: len(cards)}
+	for _, card := range cards {
+		if !card.Available {
+			continue
+		}
+		window.Available++
+		if window.NextExpiresAt == "" || (card.ExpireTime != "" && card.ExpireTime < window.NextExpiresAt) {
+			window.NextExpiresAt = card.ExpireTime
+		}
+	}
+	return window
+}
+
+func nextAvailableZhipuReset(cards []zhipuResetCard) (zhipuResetCard, bool) {
+	var selected zhipuResetCard
+	found := false
+	for _, card := range cards {
+		if !card.Available {
+			continue
+		}
+		if !found || selected.ExpireTime == "" || (card.ExpireTime != "" && card.ExpireTime < selected.ExpireTime) {
+			selected = card
+			found = true
+		}
+	}
+	return selected, found
+}
+
+func normalizeZhipuResetTime(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case float64:
+		if typed <= 0 {
+			return ""
+		}
+		milliseconds := int64(typed)
+		if milliseconds < 1_000_000_000_000 {
+			milliseconds *= 1000
+		}
+		return time.UnixMilli(milliseconds).Format(time.RFC3339)
+	default:
+		return ""
+	}
+}
+
+func randomZhipuRequestID() (string, error) {
+	var value [16]byte
+	if _, err := rand.Read(value[:]); err != nil {
+		return "", err
+	}
+	value[6] = (value[6] & 0x0f) | 0x40
+	value[8] = (value[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+		value[0:4], value[4:6], value[6:8], value[8:10], value[10:16]), nil
 }
 
 func (z *zhipuProvider) loadAccounts() ([]zhipuAccountRecord, error) {

@@ -279,3 +279,10 @@ func (m *Manager) DeleteZhipuAccount(id int64) error {
 	}
 	return m.zhipu.DeleteAccount(id)
 }
+
+func (m *Manager) ResetZhipuAccount(ctx context.Context, id int64, resetType string) (ZhipuAccount, error) {
+	if m == nil || m.zhipu == nil {
+		return ZhipuAccount{}, errZhipuNotConfigured
+	}
+	return m.zhipu.ResetAccount(ctx, id, resetType)
+}
